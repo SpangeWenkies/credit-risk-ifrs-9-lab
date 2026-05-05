@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "credit-risk-ifrs-9-lab"
+version = "0.1.0"
+description = "Portfolio project for junior credit risk modeller and junior actuary applications."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pytest",
+    "scipy",
+    "statsmodels",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

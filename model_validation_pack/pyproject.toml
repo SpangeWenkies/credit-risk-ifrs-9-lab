@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-validation-pack"
+version = "0.1.0"
+description = "Portable model validation toolkit for backtesting, stability, sensitivity, drift, and benchmark checks."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pytest",
+    "scipy",
+]
+
+[project.optional-dependencies]
+ot = ["pot"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
