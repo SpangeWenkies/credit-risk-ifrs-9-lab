@@ -1,6 +1,6 @@
 # Credit Risk & IFRS 9 Lab
 
-Portfolio project for junior credit risk modeller and junior actuary applications.
+Portfolio project for junior credit risk modellers and junior actuaries.
 
 This repository now demonstrates a full synthetic-first workflow:
 
@@ -53,8 +53,6 @@ The root project depends on:
 - `pytest`
 - `jupyter`
 
-The repository has been verified with a workspace-local virtualenv at `.venv`.
-
 ## Quick Start
 
 ```bash
@@ -77,17 +75,7 @@ The repository has been verified with a workspace-local virtualenv at `.venv`.
 - Optional Sinkhorn divergence:
   [Cuturi (2013)](https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport)
 
-## Portfolio Positioning
-
-This project is deliberately narrow. It does not mix in trading, HFT, options, or broad portfolio-optimization work. The hiring story is:
-
-- I can build a credit portfolio dataset from scratch.
-- I understand how PD, LGD, and EAD feed IFRS 9 ECL.
-- I can translate model output into governance, monitoring, and validation artefacts.
-- I can isolate reusable validation tooling into a separate package.
-
-## Suggested Talking Points
+## Talking Points
 
 - Why a synthetic multi-period panel is enough to demonstrate survival modelling and validation logic.
 - Why IFRS 9 staging and provision roll-forwards make the repo more relevant than a generic classification project.
-- Why the validation pack is generic at the API level but anchored with a credit-risk example.
