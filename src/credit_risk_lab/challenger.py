@@ -14,9 +14,10 @@ Assumptions
 
 Primary references
 ------------------
-- Board of Governors of the Federal Reserve System and OCC, "Supervisory
-  Guidance on Model Risk Management (SR 11-7)."
-  https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+- EBA, "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures."
+  https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd
+- ECB Banking Supervision, "Internal models."
+  https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
 
 Simplifications for this portfolio project
 ------------------------------------------
@@ -63,9 +64,9 @@ def score_challenger_model(snapshot_scores: pd.DataFrame) -> pd.Series:
 
     Notes
     -----
-    The challenger is intentionally simpler than the main model. Under SR 11-7,
-    a benchmark does not need to be a perfect alternative; it needs to be a
-    credible point of comparison.
+    The challenger is intentionally simpler than the main model. In EU internal-
+    model governance, a benchmark does not need to be a perfect alternative; it
+    needs to be a credible point of comparison.
 
     Edge Cases
     ----------
@@ -74,9 +75,8 @@ def score_challenger_model(snapshot_scores: pd.DataFrame) -> pd.Series:
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA, "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures."
+      https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd
     """
 
     required = ["rating_rank", "days_past_due", "ltv", "dti", "utilization", "unemployment_rate"]

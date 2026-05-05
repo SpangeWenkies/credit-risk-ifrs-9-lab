@@ -57,8 +57,10 @@ Optional:
 
 ## References
 
-- Validation governance framing:
-  [SR 11-7](https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf)
+- EU banking model validation:
+  [EBA Model Validation](https://www.eba.europa.eu/regulation-and-policy/model-validation)
+- ECB supervisory context for internal models:
+  [ECB Internal Models](https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html)
 - Probability forecast backtesting:
   [Brier (1950)](https://cir.nii.ac.jp/crid/1361981468554183168)
 - Optional Sinkhorn divergence:

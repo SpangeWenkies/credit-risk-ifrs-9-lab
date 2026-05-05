@@ -68,9 +68,8 @@ def run_sensitivity_analysis(
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - ECB Banking Supervision, "Internal models."
+      https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
     """
 
     if scoring_function is None or not feature_samples:

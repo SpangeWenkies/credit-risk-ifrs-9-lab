@@ -58,7 +58,8 @@ def compare_with_benchmark(
     Notes
     -----
     A validation benchmark need not dominate the primary model. Its value is to
-    provide an independent reference point under SR 11-7 style governance.
+    provide an independent reference point under EU-style internal-model
+    governance.
 
     Edge Cases
     ----------
@@ -69,9 +70,8 @@ def compare_with_benchmark(
     ----------
     - Brier, G. W. (1950), "Verification of Forecasts Expressed in Terms of
       Probability." https://cir.nii.ac.jp/crid/1361981468554183168
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA Model Validation.
+      https://www.eba.europa.eu/regulation-and-policy/model-validation
     """
 
     if len(observations) != len(benchmark_scores):

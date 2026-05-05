@@ -23,8 +23,13 @@ Show an end-to-end credit-risk workflow that is relevant to junior modeller and 
   [Singer & Willett (1993)](https://journals.sagepub.com/doi/10.3102/10769986018002155)
 - IFRS 9 impairment logic:
   [IFRS 9 Financial Instruments](https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf)
-- Validation governance:
-  [SR 11-7](https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf)
+- EU banking governance:
+  [EBA Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures](https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd)
+- EU banking supervisory context:
+  [ECB Internal Models](https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html)
+- Dutch / actuarial prudential context:
+  [DNB Solvency II general notes](https://www.dnb.nl/en/sector-information/open-book-supervision/open-book-supervision-sectors/insurers/law-and-regulations-insurers/solvency-ii-general-notes/)
+  and [EIOPA Solvency II](https://www.eiopa.europa.eu/browse/regulation-and-policy/solvency-ii_en)
 - Probability forecast validation:
   [Brier (1950)](https://cir.nii.ac.jp/crid/1361981468554183168)
 - Optional Sinkhorn divergence:

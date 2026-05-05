@@ -49,9 +49,8 @@ def run_stability_tests(observations: list[ScoredObservation]) -> dict[str, obje
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - ECB Banking Supervision, "Internal models."
+      https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
     """
 
     by_period: dict[str, list[ScoredObservation]] = defaultdict(list)

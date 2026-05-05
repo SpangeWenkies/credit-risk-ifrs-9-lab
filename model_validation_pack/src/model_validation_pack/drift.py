@@ -14,9 +14,8 @@ Assumptions
 
 Primary references
 ------------------
-- Board of Governors of the Federal Reserve System and OCC, "Supervisory
-  Guidance on Model Risk Management (SR 11-7)."
-  https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+- EBA Model Validation.
+  https://www.eba.europa.eu/regulation-and-policy/model-validation
 - Cuturi, M. (2013), "Sinkhorn Distances: Lightspeed Computation of Optimal
   Transport." https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport
 
@@ -158,9 +157,8 @@ def run_drift_tests(
     ----------
     - Cuturi, M. (2013), "Sinkhorn Distances: Lightspeed Computation of Optimal
       Transport." https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA Model Validation.
+      https://www.eba.europa.eu/regulation-and-policy/model-validation
     """
 
     reference_scores = [observation.score for observation in reference_observations]

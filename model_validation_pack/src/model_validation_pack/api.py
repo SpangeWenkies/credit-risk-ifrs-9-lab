@@ -80,9 +80,8 @@ def run_validation_pack(
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA Model Validation.
+      https://www.eba.europa.eu/regulation-and-policy/model-validation
     """
 
     observation_list = list(observations)

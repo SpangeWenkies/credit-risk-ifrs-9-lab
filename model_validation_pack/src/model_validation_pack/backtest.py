@@ -14,9 +14,8 @@ Primary references
 ------------------
 - Brier, G. W. (1950), "Verification of Forecasts Expressed in Terms of
   Probability." https://cir.nii.ac.jp/crid/1361981468554183168
-- Board of Governors of the Federal Reserve System and OCC, "Supervisory
-  Guidance on Model Risk Management (SR 11-7)."
-  https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+- EBA, "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures."
+  https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd
 
 Simplifications for this portfolio project
 ------------------------------------------

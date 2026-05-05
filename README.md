@@ -68,8 +68,15 @@ The root project depends on:
   [IFRS 9 Financial Instruments](https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf)
 - Discrete-time survival modelling:
   [Singer & Willett (1993)](https://journals.sagepub.com/doi/10.3102/10769986018002155)
-- Validation governance framing:
-  [SR 11-7](https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf)
+- EU banking model governance:
+  [EBA Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures](https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd)
+- EU banking monitoring and governance:
+  [EBA Guidelines on loan origination and monitoring](https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring)
+- ECB / Dutch supervisory context for internal models:
+  [ECB Internal Models](https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html)
+- Dutch / actuarial prudential context:
+  [DNB Solvency II general notes](https://www.dnb.nl/en/sector-information/open-book-supervision/open-book-supervision-sectors/insurers/law-and-regulations-insurers/solvency-ii-general-notes/)
+  and [EIOPA Solvency II](https://www.eiopa.europa.eu/browse/regulation-and-policy/solvency-ii_en)
 - Probability forecast backtesting:
   [Brier (1950)](https://cir.nii.ac.jp/crid/1361981468554183168)
 - Optional Sinkhorn divergence:
@@ -79,3 +86,5 @@ The root project depends on:
 
 - Why a synthetic multi-period panel is enough to demonstrate survival modelling and validation logic.
 - Why IFRS 9 staging and provision roll-forwards make the repo more relevant than a generic classification project.
+- Why Dutch/EU banking roles care more about `IFRS 9 + EBA/ECB/DNB` than U.S. SR guidance.
+- Why the actuarial angle should be framed through `Solvency II / DNB / EIOPA` rather than U.S. banking model-risk language.

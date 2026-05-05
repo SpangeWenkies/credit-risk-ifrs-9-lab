@@ -2,9 +2,9 @@
 
 This module provides a lightweight monitoring layer that checks schema health,
 missingness, range violations, cohort consistency, and distribution shift
-between two scored portfolio snapshots. The governance framing is inspired by
-SR 11-7, which emphasises both model performance and the reliability of the
-data and monitoring process around the model.
+between two scored portfolio snapshots. The governance framing is aligned with
+EU banking supervision expectations around credit monitoring, internal models,
+and ongoing model oversight.
 
 Assumptions
 -----------
@@ -18,9 +18,10 @@ Assumptions
 
 Primary references
 ------------------
-- Board of Governors of the Federal Reserve System and OCC, "Supervisory
-  Guidance on Model Risk Management (SR 11-7)."
-  https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+- EBA, "Guidelines on loan origination and monitoring."
+  https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring
+- ECB Banking Supervision, "Internal models."
+  https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
 
 Simplifications for this portfolio project
 ------------------------------------------
@@ -100,9 +101,8 @@ def population_stability_index(reference: pd.Series, current: pd.Series, bins: i
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA, "Guidelines on loan origination and monitoring."
+      https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring
     """
 
     if bins < 1:
@@ -172,9 +172,8 @@ def wasserstein_distance_1d(reference: pd.Series, current: pd.Series) -> float:
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - ECB Banking Supervision, "Internal models."
+      https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
     """
 
     from scipy.stats import wasserstein_distance
@@ -243,9 +242,8 @@ def run_monitoring(
 
     References
     ----------
-    - Board of Governors of the Federal Reserve System and OCC, "Supervisory
-      Guidance on Model Risk Management (SR 11-7)."
-      https://www.federalreserve.gov/boarddocs/srletters/2011/sr1107a1.pdf
+    - EBA, "Guidelines on loan origination and monitoring."
+      https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring
     """
 
     required_columns = sorted(set(DEFAULT_MONITOR_COLUMNS + ["loan_id", "segment", "snapshot_date"]))
