@@ -10,6 +10,16 @@ Reference:
 - Singer, J. D., and Willett, J. B. (1993), "It's About Time: Using Discrete-Time Survival Analysis to Study Duration and the Timing of Events."
   https://journals.sagepub.com/doi/10.3102/10769986018002155
 
+Current simplification:
+- the current version converts a one-quarter hazard into `12m PD` and `lifetime PD` using a constant-hazard approximation.
+
+Planned econometric upgrade:
+- use `src/credit_risk_lab/econometrics/forward_hazard.py` to build a forward hazard path, where future balance, seasoning, and macro variables evolve over time and lifetime PD is built from the full hazard term structure rather than a flat hazard.
+
+Best extension slots:
+- `src/credit_risk_lab/econometrics/forward_hazard.py`
+- `src/credit_risk_lab/econometrics/macro.py`
+
 ### IFRS 9 staging and ECL
 
 The impairment engine uses a simplified significant-increase-in-credit-risk framework based on delinquency, forbearance, and deterioration versus origination. This is not a production accounting policy, but it is a credible portfolio-project representation of the logic required by IFRS 9.
@@ -69,3 +79,25 @@ Reference:
 ### International comparison
 
 U.S. SR guidance can still be mentioned as an international comparison point in interviews, but it should not be the primary regulatory anchor for Dutch applications.
+
+### Markov and continuous-time room
+
+The repo is also intentionally scaffolded for two more advanced directions:
+
+- `Markov / state-transition modelling`, which is especially natural for delinquency migration, cure, prepayment, and IFRS 9 stage movement. The first implementation lives in `src/credit_risk_lab/econometrics/markov.py` and treats the transition matrix as the finite-state kernel, matrix powers as the semigroup, default/prepayment as absorbing cemetery-style states, and the absorbing-chain fundamental matrix as a Green/resolvent analogue.
+- `Continuous-time default modelling`, which becomes relevant when default timing is observed more finely than just quarter-end panels and where counting-process / intensity ideas become useful. The first implementation lives in `src/credit_risk_lab/econometrics/continuous_time.py` and includes piecewise intensity estimates, counting-process tables, compensated default diagnostics, and survival from intensity paths.
+
+Best extension slots:
+- `src/credit_risk_lab/econometrics/markov.py`
+- `src/credit_risk_lab/econometrics/continuous_time.py`
+
+Detailed bridge note:
+- `docs/dirichlet_markov_credit_bridge.md`
+
+References:
+- Fukushima, M., Oshima, Y., and Takeda, M. (2011), "Dirichlet Forms and Symmetric Markov Processes."
+  https://www.degruyterbrill.com/document/doi/10.1515/9783110218091/html
+- Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for the Term Structure of Credit Risk Spreads."
+  https://academic.oup.com/rfs/article/10/2/481/1589160
+- Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and Rating Drift with Continuous Observations."
+  https://www.sciencedirect.com/science/article/pii/S037842660100228X
