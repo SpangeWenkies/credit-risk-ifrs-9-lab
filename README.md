@@ -56,9 +56,7 @@ So this repo should be read as:
 
 ## Econometrics To Credit Risk
 
-The current repo already maps standard econometric ideas into credit-risk tasks:
-
-| Econometrics skill | Credit-risk use | Current location | Planned extension location |
+| Econometrics skill | Credit-risk use | Current location | Planned extension |
 | --- | --- | --- | --- |
 | Logistic / limited dependent variable models | PD and delinquency modelling | [`survival.py`](src/credit_risk_lab/survival.py), [`challenger.py`](src/credit_risk_lab/challenger.py) | [`src/credit_risk_lab/econometrics/limited_dep.py`](src/credit_risk_lab/econometrics/limited_dep.py) |
 | Panel data | Loan-quarter performance panels | [`portfolio.py`](src/credit_risk_lab/portfolio.py) | [`src/credit_risk_lab/econometrics/panel.py`](src/credit_risk_lab/econometrics/panel.py) |
@@ -74,11 +72,11 @@ The current repo already maps standard econometric ideas into credit-risk tasks:
 | Heterogeneity | Segment effects, borrower/product differences | [`heterogeneity.py`](src/credit_risk_lab/econometrics/heterogeneity.py) | extend with hierarchical models |
 | Model selection | Feature choice and challenger models | [`model_selection.py`](src/credit_risk_lab/econometrics/model_selection.py), validation pack | extend with cross-validation workflows |
 
-The fuller roadmap is in [docs/econometric_extensions.md](docs/econometric_extensions.md). The Markov-chain extension has a separate functional-analysis bridge note in [docs/dirichlet_markov_credit_bridge.md](docs/dirichlet_markov_credit_bridge.md).
+The fuller plan is in [docs/econometric_extensions.md](docs/econometric_extensions.md). The Markov-chain extension has a separate functional-analysis bridge note in [docs/dirichlet_markov_credit_bridge.md](docs/dirichlet_markov_credit_bridge.md), to make use of my knowledge from a PhD course I took.
 
 ## Econometrics-Heavy Extension Slots
 
-The repo is intentionally built so it can grow into heavier econometric work later without changing its core story.
+The repo is built so it can grow into heavier econometric work later
 
 ### 1. Remove the constant-hazard assumption
 
@@ -91,7 +89,7 @@ Implemented first layer:
 - score a hazard path `h1, h2, ..., hn`,
 - compute lifetime PD from `1 - Π(1 - h_t)` instead of `1 - (1 - h)^n`.
 
-### 2. Put macro variables directly into the PD channel
+### 2. Put macro variables directly into the PD part instead of ECL later
 
 Implemented locations:
 - [`src/credit_risk_lab/econometrics/macro.py`](src/credit_risk_lab/econometrics/macro.py)
@@ -104,11 +102,11 @@ Implemented first layer:
 - keep the intended design clear: overlays mainly for LGD and EAD,
 - avoid double-counting macro effects on PD.
 
-### 3. Add a Markov challenger for migration logic
+### 3. Add a Markov "challenger" model for migration logic
 
 Current state:
-- the repo already produces stage summaries, migration matrices, and provision roll-forwards,
-- `src/credit_risk_lab/econometrics/markov.py` now adds the first finite-state transition model scaffold and utilities.
+- the repo produces stage summaries, migration matrices, and provision roll-forwards,
+- `src/credit_risk_lab/econometrics/markov.py` now adds a first finite-state transition model placeholder and some other utilities.
 
 Planned location:
 - [`src/credit_risk_lab/econometrics/markov.py`](src/credit_risk_lab/econometrics/markov.py)
@@ -124,7 +122,7 @@ Implemented first layer:
 - estimate grouped transition matrices for segment or macro-regime style conditioning,
 - compute Markov-implied default probabilities for comparison against survival-logit PDs.
 
-Intended next upgrade:
+Intended next part:
 - estimate transition probabilities across `current`, `1-29 DPD`, `30-89 DPD`, `90+ / default`, `cure`, and `prepay / mature`,
 - use a simple transition matrix as a transparent challenger,
 - later extend to covariate-dependent transition models,
@@ -156,15 +154,7 @@ Implemented first layer:
 - causal variable audits and policy-shock sensitivity without overclaiming causality,
 - AIC/BIC/Brier challenger model selection.
 
-## Public Root APIs
-
-- `generate_portfolio_timeseries(config) -> PortfolioDataset`
-- `fit_survival_pd_model(panel, feature_spec) -> SurvivalPDModel`
-- `score_portfolio(dataset, model, as_of_date) -> PDScoreFrame`
-- `run_ifrs9_pipeline(dataset, pd_scores, lgd_model, ead_model, scenarios) -> ECLReport`
-- `run_monitoring(reference_snapshot, current_snapshot, reference_scores, current_scores) -> MonitoringReport`
-
-## Scientific Stack
+## Dependencies
 
 The root project depends on:
 

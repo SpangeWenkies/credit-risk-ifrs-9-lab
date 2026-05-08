@@ -1,14 +1,14 @@
 # Dirichlet-Form Markov Theory In The Credit Migration Module
 
-This note explains how the Markov-chain and Dirichlet-form material from the course can be used in the credit-risk repo without forcing abstract theory where it does not belong.
+This note explains how part of the basics of the Markov-chain and Dirichlet-form material from my course on Dirichlet forms at Tor Vergata can be used in the credit-risk repo without forcing abstract theory where it does not belong.
 
 ## Bottom Line
 
-The correspondence from the course is directly useful for the Markov-chain part of this repo, but at the right level:
+The 1-to-1 correspondence from markov chains and functional analysis objects in the course is directly useful for the Markov-chain challenger model part of this repo, but at the right level:
 
 - Use it strongly for finite-state credit migration, transition matrices, semigroups, generators, absorbing states, and Green/fundamental matrices.
 - Use it carefully for Dirichlet-energy diagnostics on score or stage functions over the migration graph.
-- Do not overclaim regularity, quasi-regularity, capacity, polar sets, LeJan energy measures, or Cheeger energy in the first credit version. Those are better reserved for a later continuous-state or continuous-time extension.
+- Explicitly avoided is overclaiming regularity, quasi-regularity, capacity, polar sets, LeJan energy measures, or Cheeger energy in the first credit version. Those are better reserved for a later continuous-state or continuous-time extensions of the credit risk repo.
 
 The practical credit translation is:
 
@@ -33,7 +33,7 @@ In the notes, a Markov kernel maps a starting point to a probability measure ove
 P_ij = P(next_state = j | current_state = i)
 ```
 
-This is exactly what a credit migration challenger should estimate. The repo now has `fit_markov_transition_model(...)` in `src/credit_risk_lab/econometrics/markov.py`.
+This is exactly what the credit migration challenger model should estimate. The repo now has `fit_markov_transition_model(...)` in `src/credit_risk_lab/econometrics/markov.py`.
 
 ### 2. Matrix Powers As Semigroup
 
