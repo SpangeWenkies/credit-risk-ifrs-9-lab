@@ -76,7 +76,7 @@ The notes use a cemetery state to make a killed process conservative after it le
 - default and prepay/maturity remove the loan from active performance,
 - adding `default` and `prepay_mature` as absorbing states keeps the augmented chain row-stochastic.
 
-This is useful in interviews because it shows the same idea in credit language: active-book attrition is a loss of mass unless terminal outcomes are included.
+This is useful because it shows the same idea in credit language: active-book attrition is a loss of mass unless terminal outcomes are included.
 
 ### 5. Green/Fundamental Matrix For Expected Time Before Absorption
 
@@ -92,7 +92,7 @@ where `P_TT` is the transient-to-transient block. In credit risk this gives:
 - expected time spent in delinquency states,
 - eventual probability of default versus prepayment/maturity.
 
-This is a strong way to make the Markov challenger more than a transition-count table.
+This is a strong as it makes Markov challenger more usefull than just a transition-count table.
 
 ### 6. Dirichlet Energy As A Score Smoothness Diagnostic
 
@@ -109,9 +109,9 @@ A finite-state energy diagnostic has the form:
 E(f) = 1/2 sum_i m_i sum_j P_ij (f_i - f_j)^2
 ```
 
-Because credit migration is usually non-reversible, the repo symmetrises the jump conductance by default for this diagnostic. That keeps the interpretation honest: it is a transition-graph roughness measure, not a claim that credit migration is reversible.
+Because credit migration is usually non-reversible, the repo symmetrises the jump conductance by default for this diagnostic.
 
-This is a credible econometrics-heavy extension because it lets you ask:
+This is a good econometrics-heavy extension because it lets you ask:
 
 - Are score jumps aligned with observed migration?
 - Does the stage scale vary smoothly across common transitions?
@@ -119,7 +119,7 @@ This is a credible econometrics-heavy extension because it lets you ask:
 
 ## What Should Not Be Forced Into V1
 
-Several lecture topics are mathematically important but too abstract for the first credit-risk implementation.
+Several lecture topics are mathematically important but too abstract for a first (discrete) credit-risk implementation.
 
 ### Regularity And Quasi-Regularity
 
@@ -144,7 +144,7 @@ Possible future use:
 
 ### Locality, LeJan, Carre Du Champ, Cheeger Energy
 
-These are mainly useful for continuous-state local dynamics. Credit migration between delinquency buckets is a jump process, so the Beurling-Deny jump part is the more relevant conceptual bridge. The continuous local part is not the right first object.
+These are mainly useful for continuous-state local dynamics. Credit migration between delinquency types is a jump process, so the Beurling-Deny jump part is the more relevant conceptual bridge. The continuous local part is not the right first object.
 
 Possible future use:
 
