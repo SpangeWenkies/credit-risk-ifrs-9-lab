@@ -1,20 +1,12 @@
 # Econometric Extensions Map
 
-This document makes explicit where heavier econometric work fits into the repository.
+This document makes explicit where econometric work fits into the repository.
 
 ## Positioning
 
 The repo should communicate this message clearly:
 
 > The statistical structure is already familiar to me from econometrics. What I am doing here is using that toolkit in a credit-risk setting, where the outputs must become PD, LGD, EAD, IFRS 9, monitoring, and validation artefacts.
-
-That means the repo is not only:
-
-- "I want to learn credit risk."
-
-It is also:
-
-- "I already have econometric tools and I am applying them to credit risk."
 
 ## Direct Mapping
 
