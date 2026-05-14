@@ -2,9 +2,9 @@
 
 This module implements a pooled-logit discrete-time survival model on quarterly
 account-performance panels. The project uses the Singer and Willett framework
-because it is intuitive for interview discussions, naturally aligns with
-panelised retail credit data, and produces probabilities that can be rolled
-into both 12-month and lifetime IFRS 9 horizons.
+because it is transparent, naturally aligns with panelised retail credit data,
+and produces probabilities that can be rolled into both 12-month and lifetime
+IFRS 9 horizons.
 
 Assumptions
 -----------
@@ -13,7 +13,7 @@ Assumptions
   quarter-end.
 - The conditional hazard predicted for the current snapshot is held constant
   across future quarters when converting a one-quarter hazard into a 12-month or
-  lifetime PD. This is a simplification for a portfolio project.
+  lifetime PD. This is a baseline simplification.
 - The model is pooled across products, with segment and region effects handled
   through categorical regressors rather than separate sub-models.
 
@@ -23,13 +23,13 @@ Primary references
   Discrete-Time Survival Analysis to Study Duration and the Timing of Events."
   https://journals.sagepub.com/doi/10.3102/10769986018002155
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The implementation uses a straightforward logistic GLM from `statsmodels`
   rather than production regularisation, calibration overlays, or macro-varying
   future hazards.
-- Feature engineering is intentionally transparent so a recruiter can follow the
-  mapping from raw panel fields to model inputs.
+- Feature engineering is intentionally transparent so the mapping from raw
+  panel fields to model inputs can be audited.
 """
 
 from __future__ import annotations
@@ -193,7 +193,7 @@ def fit_survival_pd_model(
     Notes
     -----
     The model is intentionally simple and unregularised. That makes coefficient
-    signs easy to explain, which is useful for a junior credit-risk portfolio.
+    signs easy to inspect in the baseline credit-risk workflow.
 
     Edge Cases
     ----------

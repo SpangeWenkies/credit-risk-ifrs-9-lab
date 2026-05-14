@@ -9,4 +9,5 @@ build/
 dist/
 *.egg-info/
 outputs/
-
+docs/portfolio_story.md
+docs/private_interview_framing.md

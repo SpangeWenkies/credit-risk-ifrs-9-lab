@@ -20,7 +20,7 @@ Primary references
   Analysis to Study Duration and the Timing of Events."
 - IFRS Foundation, "IFRS 9 Financial Instruments."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - Feature projection is deterministic and intentionally transparent.
 - Borrower income and behavioural features are not simulated with a full

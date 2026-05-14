@@ -33,7 +33,7 @@ Primary references
 - Lando and Skodeberg (2002), "Analyzing Rating Transitions and Rating Drift
   with Continuous Observations."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The model estimates unconditional transition probabilities before adding
   covariates. A later extension can replace this with multinomial logit or a
@@ -52,6 +52,8 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.linalg import expm, logm
+import statsmodels.api as sm
 
 CREDIT_STATES: tuple[str, ...] = (
     "current",
@@ -73,6 +75,33 @@ class MarkovTransitionModel:
     transition_matrix: pd.DataFrame
     transition_panel: pd.DataFrame
     smoothing: float
+
+
+@dataclass(slots=True)
+class GeneratorEmbeddingDiagnostics:
+    """Matrix-logarithm generator candidate and embeddability diagnostics."""
+
+    generator: pd.DataFrame
+    is_valid_generator: bool
+    max_imaginary_part: float
+    min_off_diagonal: float
+    max_row_sum_abs: float
+    reconstruction_error: float
+    message: str
+
+
+@dataclass(slots=True)
+class CovariateTransitionModel:
+    """One-vs-rest covariate-dependent Markov transition model."""
+
+    states: tuple[str, ...]
+    absorbing_states: tuple[str, ...]
+    feature_columns: tuple[str, ...]
+    categorical_columns: tuple[str, ...]
+    design_columns: tuple[str, ...]
+    origin_destination_models: dict[str, dict[str, object]]
+    origin_base_probabilities: dict[str, pd.Series]
+    min_rows: int
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
@@ -183,6 +212,83 @@ def _as_square_transition_matrix(transition_matrix: pd.DataFrame) -> pd.DataFram
     if not np.allclose(row_sums, 1.0, atol=1e-8):
         raise ValueError("Transition matrix rows must sum to one.")
     return matrix
+
+
+def _prepare_covariate_design(
+    frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    categorical_columns: Sequence[str],
+    design_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Build a stable design matrix for covariate transition logits.
+
+    Summary
+    -------
+    Convert borrower, loan, and macro covariates into the deterministic design
+    matrix used by the covariate-dependent Markov transition model.
+
+    Method
+    ------
+    Numeric covariates are cast to float and missing values are imputed with
+    zero. Categorical covariates are one-hot encoded with a dropped reference
+    level. A constant is added and columns are sorted. During scoring, the
+    matrix is reindexed to the fitted `design_columns` so missing dummy levels
+    become zeros and unexpected levels are ignored.
+
+    Parameters
+    ----------
+    frame:
+        Transition-panel or scoring frame containing covariates.
+    feature_columns:
+        Numeric covariates to include.
+    categorical_columns:
+        Categorical covariates to dummy encode.
+    design_columns:
+        Optional fitted design-column order.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Numeric design matrix with a constant term.
+
+    Raises
+    ------
+    KeyError
+        Raised when a requested feature column is missing.
+
+    Notes
+    -----
+    This helper is deliberately local to the Markov module because transition
+    logits have a different target structure from the primary survival-logit PD
+    model.
+
+    Edge Cases
+    ----------
+    Empty inputs return an empty matrix with the fitted columns when
+    `design_columns` are supplied.
+
+    References
+    ----------
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    """
+
+    required = list(feature_columns) + list(categorical_columns)
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing covariate transition columns: {missing}")
+
+    numeric = frame[list(feature_columns)].astype(float).fillna(0.0) if feature_columns else pd.DataFrame(index=frame.index)
+    if categorical_columns:
+        categoricals = pd.get_dummies(frame[list(categorical_columns)].astype("category"), drop_first=True, dtype=float)
+    else:
+        categoricals = pd.DataFrame(index=frame.index)
+    design = pd.concat([numeric, categoricals], axis=1)
+    design = sm.add_constant(design, has_constant="add")
+    design = design.reindex(sorted(design.columns), axis=1)
+    if design_columns is not None:
+        design = design.reindex(list(design_columns), axis=1, fill_value=0.0)
+    return design.astype(float)
 
 
 def assign_delinquency_state(frame: pd.DataFrame, dpd_column: str = "days_past_due") -> pd.Series:
@@ -347,7 +453,22 @@ def build_transition_panel(
     ordered.loc[~has_next_observation & ~default_exit & prepay_or_mature_exit, "next_state"] = "prepay_mature"
 
     retained = [loan_id_column, date_column, "state", "next_state"]
-    for optional in ("segment", "region", "rating_rank", "forborne", "prepayment_flag"):
+    for optional in (
+        "segment",
+        "region",
+        "rating_rank",
+        "forborne",
+        "prepayment_flag",
+        "quarters_on_book",
+        "remaining_term_quarters",
+        "ltv",
+        "dti",
+        "days_past_due",
+        "unemployment_rate",
+        "policy_rate",
+        "house_price_growth",
+        "gdp_growth",
+    ):
         if optional in ordered.columns:
             retained.append(optional)
 
@@ -618,6 +739,736 @@ def markov_implied_default_pd(
     return float(projected.loc[initial_state, default_state])
 
 
+def fit_covariate_transition_model(
+    transition_panel: pd.DataFrame,
+    feature_columns: Sequence[str],
+    categorical_columns: Sequence[str] | None = None,
+    states: Sequence[str] = CREDIT_STATES,
+    absorbing_states: Sequence[str] = ABSORBING_STATES,
+    min_rows: int = 30,
+    smoothing: float = 0.5,
+) -> CovariateTransitionModel:
+    """Fit a covariate-dependent Markov transition model.
+
+    Summary
+    -------
+    Estimate `P(next_state | current_state, borrower features, macro variables)`
+    using separate one-vs-rest transition logits by origin state.
+
+    Method
+    ------
+    For each non-absorbing origin state, the function estimates one binary GLM
+    per possible destination state. The resulting one-vs-rest probabilities are
+    clipped and normalised to sum to one at prediction time. When a destination
+    has no event variation or a state has too few rows, empirical smoothed
+    transition frequencies are retained as a robust fallback.
+
+    Parameters
+    ----------
+    transition_panel:
+        Observed transition panel with `state`, `next_state`, and covariates.
+    feature_columns:
+        Numeric borrower, loan, behavioural, or macro covariates.
+    categorical_columns:
+        Optional categorical covariates such as segment or region.
+    states:
+        Ordered Markov states.
+    absorbing_states:
+        States forced to self-transition.
+    min_rows:
+        Minimum origin-state row count required before fitting logits.
+    smoothing:
+        Additive smoothing for empirical fallback probabilities.
+
+    Returns
+    -------
+    CovariateTransitionModel
+        Fitted one-vs-rest transition model with empirical fallbacks.
+
+    Raises
+    ------
+    KeyError
+        Raised when required transition or covariate columns are missing.
+    ValueError
+        Raised when `min_rows <= 0` or `smoothing < 0`.
+
+    Notes
+    -----
+    This intentionally avoids forcing every transition through a fragile full
+    multinomial model. Credit migration panels are often sparse in severe
+    delinquency states, so robust fallbacks are more valuable than a single
+    elegant but brittle likelihood.
+
+    Edge Cases
+    ----------
+    Absorbing states are stored with deterministic self-transition
+    probabilities and no fitted logits.
+
+    References
+    ----------
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for
+      the Term Structure of Credit Risk Spreads."
+    """
+
+    if min_rows <= 0:
+        raise ValueError("min_rows must be positive.")
+    if smoothing < 0:
+        raise ValueError("smoothing must be non-negative.")
+    categorical_columns = list(categorical_columns or [])
+    state_tuple = tuple(states)
+    absorbing_tuple = tuple(absorbing_states)
+    required = ["state", "next_state", *feature_columns, *categorical_columns]
+    missing = [column for column in required if column not in transition_panel.columns]
+    if missing:
+        raise KeyError(f"Missing covariate transition columns: {missing}")
+
+    design = _prepare_covariate_design(transition_panel, feature_columns, categorical_columns)
+    design_columns = tuple(design.columns)
+    origin_models: dict[str, dict[str, object]] = {}
+    base_probabilities: dict[str, pd.Series] = {}
+
+    for origin_state in state_tuple:
+        subset = transition_panel.loc[transition_panel["state"].eq(origin_state)].copy()
+        if origin_state in absorbing_tuple:
+            base = pd.Series(0.0, index=state_tuple, dtype=float)
+            base.loc[origin_state] = 1.0
+            base_probabilities[origin_state] = base
+            origin_models[origin_state] = {}
+            continue
+
+        counts = subset["next_state"].value_counts().reindex(state_tuple, fill_value=0).astype(float)
+        if float(counts.sum()) > 0:
+            base = (counts + float(smoothing)) / float((counts + float(smoothing)).sum())
+        else:
+            base = pd.Series(0.0, index=state_tuple, dtype=float)
+            base.loc[origin_state] = 1.0
+        base_probabilities[origin_state] = base
+
+        fitted: dict[str, object] = {}
+        if len(subset) < min_rows:
+            origin_models[origin_state] = fitted
+            continue
+        origin_design = design.loc[subset.index]
+        for destination_state in state_tuple:
+            target = subset["next_state"].eq(destination_state).astype(int)
+            if target.nunique() < 2:
+                continue
+            try:
+                fitted[destination_state] = sm.GLM(target, origin_design, family=sm.families.Binomial()).fit()
+            except Exception:
+                continue
+        origin_models[origin_state] = fitted
+
+    return CovariateTransitionModel(
+        states=state_tuple,
+        absorbing_states=absorbing_tuple,
+        feature_columns=tuple(feature_columns),
+        categorical_columns=tuple(categorical_columns),
+        design_columns=design_columns,
+        origin_destination_models=origin_models,
+        origin_base_probabilities=base_probabilities,
+        min_rows=int(min_rows),
+    )
+
+
+def predict_covariate_transition_probabilities(
+    model: CovariateTransitionModel,
+    frame: pd.DataFrame,
+    state_column: str = "state",
+) -> pd.DataFrame:
+    """Predict row-level Markov transition probabilities.
+
+    Summary
+    -------
+    Produce a long-form table of `P(next_state | current_state, X)` for each
+    scoring row and destination state.
+
+    Method
+    ------
+    The function builds the fitted design matrix, evaluates any available
+    destination-specific logits for the row's origin state, fills missing logits
+    with empirical fallback probabilities, clips scores to valid probability
+    ranges, and normalises each row across destinations.
+
+    Parameters
+    ----------
+    model:
+        Fitted covariate transition model.
+    frame:
+        Scoring frame containing a current state and the fitted covariates.
+    state_column:
+        Column holding the row's origin state.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-form probabilities with columns `row_id`, `state`, `next_state`,
+        and `probability`.
+
+    Raises
+    ------
+    KeyError
+        Raised when `state_column` or model covariates are missing.
+
+    Notes
+    -----
+    Normalising one-vs-rest probabilities gives a practical transition
+    distribution while retaining robust binary-logit fallbacks for sparse
+    migration states.
+
+    Edge Cases
+    ----------
+    Unknown origin states fall back to a deterministic self-transition if the
+    state is in the model state list, otherwise a `KeyError` is raised.
+
+    References
+    ----------
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    """
+
+    if state_column not in frame.columns:
+        raise KeyError(f"Missing state column: {state_column}")
+    design = _prepare_covariate_design(frame, model.feature_columns, model.categorical_columns, model.design_columns)
+    rows: list[dict[str, object]] = []
+    for row_id, row in frame.iterrows():
+        origin_state = str(row[state_column])
+        if origin_state not in model.states:
+            raise KeyError(f"Unknown origin state: {origin_state}")
+        if origin_state in model.absorbing_states:
+            probabilities = pd.Series(0.0, index=model.states, dtype=float)
+            probabilities.loc[origin_state] = 1.0
+        else:
+            probabilities = model.origin_base_probabilities[origin_state].copy()
+            fitted = model.origin_destination_models.get(origin_state, {})
+            row_design = design.loc[[row_id]]
+            for destination_state, result in fitted.items():
+                probabilities.loc[destination_state] = float(result.predict(row_design).iloc[0])
+            probabilities = probabilities.clip(lower=1e-9, upper=1.0)
+            probabilities = probabilities / float(probabilities.sum())
+        for destination_state, probability in probabilities.items():
+            rows.append(
+                {
+                    "row_id": row_id,
+                    "state": origin_state,
+                    "next_state": destination_state,
+                    "probability": float(probability),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def covariate_markov_default_pd(
+    model: CovariateTransitionModel,
+    frame: pd.DataFrame,
+    horizon_steps: int,
+    state_column: str = "state",
+    default_state: str = "default",
+) -> pd.Series:
+    """Compute row-level default PDs from covariate transition probabilities.
+
+    Summary
+    -------
+    Convert fitted covariate-dependent one-step transitions into horizon
+    default probabilities for comparison with survival-logit PDs.
+
+    Method
+    ------
+    For each row, the predicted one-step transition distribution is used as the
+    row corresponding to the current state, while other rows fall back to their
+    empirical transition probabilities. The resulting matrix is raised to the
+    requested horizon and the default-state entry is read from the origin row.
+
+    Parameters
+    ----------
+    model:
+        Fitted covariate transition model.
+    frame:
+        Scoring frame with current states and covariates.
+    horizon_steps:
+        Number of periods to project.
+    state_column:
+        Origin-state column.
+    default_state:
+        Absorbing default state.
+
+    Returns
+    -------
+    pandas.Series
+        Markov-implied default PDs aligned to `frame.index`.
+
+    Raises
+    ------
+    ValueError
+        Raised when `horizon_steps < 0`.
+    KeyError
+        Raised when the default state is absent.
+
+    Notes
+    -----
+    This is a transparent challenger comparison rather than a full dynamic
+    covariate path model. Future covariates are held fixed for the projection.
+
+    Edge Cases
+    ----------
+    `horizon_steps=0` returns one for rows already in default and zero
+    otherwise.
+
+    References
+    ----------
+    - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for
+      the Term Structure of Credit Risk Spreads."
+    """
+
+    if horizon_steps < 0:
+        raise ValueError("horizon_steps must be non-negative.")
+    if default_state not in model.states:
+        raise KeyError(f"Unknown default_state: {default_state}")
+
+    predicted = predict_covariate_transition_probabilities(model, frame, state_column=state_column)
+    result = pd.Series(index=frame.index, dtype=float)
+    for row_id, row_probs in predicted.groupby("row_id"):
+        origin_state = str(frame.loc[row_id, state_column])
+        matrix = pd.DataFrame(
+            [model.origin_base_probabilities[state].reindex(model.states).to_numpy(dtype=float) for state in model.states],
+            index=model.states,
+            columns=model.states,
+        )
+        row_vector = row_probs.set_index("next_state")["probability"].reindex(model.states).to_numpy(dtype=float)
+        matrix.loc[origin_state] = row_vector
+        result.loc[row_id] = markov_implied_default_pd(matrix, origin_state, horizon_steps, default_state)
+    return result
+
+
+def compare_markov_to_survival_pd(
+    frame: pd.DataFrame,
+    survival_pd_column: str,
+    horizon_steps: int,
+    transition_matrix: pd.DataFrame | None = None,
+    covariate_model: CovariateTransitionModel | None = None,
+    state_column: str = "state",
+    default_state: str = "default",
+) -> pd.DataFrame:
+    """Compare Markov-implied default risk with survival-model PDs.
+
+    Summary
+    -------
+    Create a challenger comparison table between a Markov migration model and
+    the primary pooled-logit survival PD model.
+
+    Method
+    ------
+    If `covariate_model` is supplied, row-level Markov PDs are computed from
+    covariate transition probabilities. Otherwise, the unconditional transition
+    matrix is used by starting state. The result is aligned with the supplied
+    survival PD column and includes absolute differences.
+
+    Parameters
+    ----------
+    frame:
+        Scored frame containing survival PDs and current states.
+    survival_pd_column:
+        Column containing the primary survival-model PD.
+    horizon_steps:
+        Number of Markov periods to project.
+    transition_matrix:
+        Unconditional transition matrix used when no covariate model is given.
+    covariate_model:
+        Optional fitted covariate transition model.
+    state_column:
+        Column containing current Markov states.
+    default_state:
+        Absorbing default state.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Comparison table with survival PD, Markov PD, and differences.
+
+    Raises
+    ------
+    KeyError
+        Raised when required columns are missing.
+    ValueError
+        Raised when neither `transition_matrix` nor `covariate_model` is given.
+
+    Notes
+    -----
+    The comparison supports the lab design where survival logit remains the
+    primary PD model and Markov migration is a challenger or explanatory model.
+
+    Edge Cases
+    ----------
+    Rows with missing survival PD are retained with missing differences.
+
+    References
+    ----------
+    - Brier, G. W. (1950), "Verification of Forecasts Expressed in Terms of
+      Probability."
+    - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for
+      the Term Structure of Credit Risk Spreads."
+    """
+
+    missing = [column for column in (survival_pd_column, state_column) if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing comparison columns: {missing}")
+    if transition_matrix is None and covariate_model is None:
+        raise ValueError("Either transition_matrix or covariate_model must be supplied.")
+
+    if covariate_model is not None:
+        markov_pd = covariate_markov_default_pd(covariate_model, frame, horizon_steps, state_column, default_state)
+    else:
+        matrix = _as_square_transition_matrix(transition_matrix)  # type: ignore[arg-type]
+        markov_pd = frame[state_column].map(lambda state: markov_implied_default_pd(matrix, str(state), horizon_steps, default_state))
+    output = frame[[state_column, survival_pd_column]].copy()
+    output["markov_pd"] = markov_pd.astype(float)
+    output["pd_difference"] = output["markov_pd"] - output[survival_pd_column].astype(float)
+    output["absolute_pd_difference"] = output["pd_difference"].abs()
+    return output
+
+
+def assign_macro_regime(
+    frame: pd.DataFrame,
+    macro_column: str = "unemployment_rate",
+    low_quantile: float = 0.33,
+    high_quantile: float = 0.67,
+    output_column: str = "macro_regime",
+) -> pd.DataFrame:
+    """Assign benign, baseline, and stress regimes from a macro variable.
+
+    Summary
+    -------
+    Create a transparent macro-regime label that can condition Markov migration
+    matrices without hard-coding a full macro satellite model.
+
+    Method
+    ------
+    The selected macro variable is split at two empirical quantiles. Values at
+    or below the low threshold are labelled `benign`, values at or above the
+    high threshold are labelled `stress`, and middle observations are labelled
+    `baseline`.
+
+    Parameters
+    ----------
+    frame:
+        Data frame containing the macro variable.
+    macro_column:
+        Macro variable used for regime assignment.
+    low_quantile:
+        Lower quantile cut.
+    high_quantile:
+        Upper quantile cut.
+    output_column:
+        Name of the regime label column to create.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of `frame` with the added regime column.
+
+    Raises
+    ------
+    KeyError
+        Raised when `macro_column` is missing.
+    ValueError
+        Raised when quantile settings are invalid.
+
+    Notes
+    -----
+    The regime label is intentionally coarse. It lets the lab compare migration
+    behaviour across macro environments while avoiding double-counting macro
+    effects in both PD and ECL layers.
+
+    Edge Cases
+    ----------
+    If all macro values are equal, every row is assigned `baseline`.
+
+    References
+    ----------
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    """
+
+    if macro_column not in frame.columns:
+        raise KeyError(f"Missing macro column: {macro_column}")
+    if not (0.0 < low_quantile < high_quantile < 1.0):
+        raise ValueError("Require 0 < low_quantile < high_quantile < 1.")
+    data = frame.copy()
+    values = data[macro_column].astype(float)
+    low = float(values.quantile(low_quantile))
+    high = float(values.quantile(high_quantile))
+    if np.isclose(low, high):
+        data[output_column] = "baseline"
+        return data
+    data[output_column] = np.select([values <= low, values >= high], ["benign", "stress"], default="baseline")
+    return data
+
+
+def fit_macro_regime_transition_matrices(
+    transition_panel: pd.DataFrame,
+    macro_column: str = "unemployment_rate",
+    regime_column: str = "macro_regime",
+    states: Sequence[str] = CREDIT_STATES,
+    absorbing_states: Sequence[str] = ABSORBING_STATES,
+    smoothing: float = 0.5,
+) -> dict[str, pd.DataFrame]:
+    """Estimate Markov transition matrices by macro regime.
+
+    Summary
+    -------
+    Fit baseline, benign, and stress migration matrices for scenario analysis.
+
+    Method
+    ------
+    The transition panel is labelled with macro regimes when the regime column
+    is absent. The function then reuses grouped transition estimation to produce
+    one row-stochastic matrix per regime, with absorbing terminal states forced
+    to self-transition.
+
+    Parameters
+    ----------
+    transition_panel:
+        Transition panel with `state`, `next_state`, and a macro variable.
+    macro_column:
+        Macro variable used when regime labels need to be created.
+    regime_column:
+        Regime column to group on.
+    states:
+        Ordered Markov states.
+    absorbing_states:
+        Absorbing terminal states.
+    smoothing:
+        Additive smoothing for transition rows.
+
+    Returns
+    -------
+    dict[str, pandas.DataFrame]
+        Regime-to-transition-matrix mapping.
+
+    Raises
+    ------
+    KeyError
+        Raised when required transition or macro columns are missing.
+
+    Notes
+    -----
+    This is the V3 macro-sensitive Markov layer. It should be used as a primary
+    migration channel or as a challenger, not stacked blindly on top of a
+    macro-sensitive PD model.
+
+    Edge Cases
+    ----------
+    Regimes with no observations are absent from the returned mapping.
+
+    References
+    ----------
+    - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for
+      the Term Structure of Credit Risk Spreads."
+    """
+
+    panel = transition_panel.copy()
+    if regime_column not in panel.columns:
+        panel = assign_macro_regime(panel, macro_column=macro_column, output_column=regime_column)
+    return transition_matrices_by_group(
+        panel,
+        group_column=regime_column,
+        states=states,
+        absorbing_states=absorbing_states,
+        smoothing=smoothing,
+    )
+
+
+def build_markov_scenario_matrices(
+    regime_matrices: Mapping[str, pd.DataFrame],
+    fallback_matrix: pd.DataFrame,
+    scenario_regime_map: Mapping[str, str] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Map macro regimes to baseline, downside, and upside scenario matrices.
+
+    Summary
+    -------
+    Convert regime-conditioned Markov matrices into scenario-conditioned
+    matrices for migration-based ECL or challenger analysis.
+
+    Method
+    ------
+    The default mapping uses `baseline -> baseline`, `downside -> stress`, and
+    `upside -> benign`. Missing regimes fall back to the supplied portfolio
+    matrix so scenario analysis remains runnable on small samples.
+
+    Parameters
+    ----------
+    regime_matrices:
+        Regime-to-transition-matrix mapping.
+    fallback_matrix:
+        Portfolio-level transition matrix used when a regime is missing.
+    scenario_regime_map:
+        Optional explicit scenario-to-regime mapping.
+
+    Returns
+    -------
+    dict[str, pandas.DataFrame]
+        Scenario-to-transition-matrix mapping.
+
+    Raises
+    ------
+    ValueError
+        Raised when `fallback_matrix` is not row-stochastic.
+
+    Notes
+    -----
+    The function makes the macro channel explicit. If PD already includes macro
+    covariates, these scenario matrices should be used for migration explanation
+    or challenger comparison rather than as an additional PD multiplier.
+
+    Edge Cases
+    ----------
+    Empty `regime_matrices` returns every scenario mapped to the fallback
+    matrix.
+
+    References
+    ----------
+    - IFRS Foundation, "IFRS 9 Financial Instruments."
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    """
+
+    fallback = _as_square_transition_matrix(fallback_matrix)
+    mapping = dict(scenario_regime_map or {"baseline": "baseline", "downside": "stress", "upside": "benign"})
+    return {scenario: _as_square_transition_matrix(regime_matrices.get(regime, fallback)) for scenario, regime in mapping.items()}
+
+
+def aggregate_transition_matrix(
+    transition_matrix: pd.DataFrame,
+    state_to_bucket: Mapping[str, str],
+) -> pd.DataFrame:
+    """Aggregate a state transition matrix to coarser buckets.
+
+    Summary
+    -------
+    Translate detailed delinquency-state migration into stage, bucket, or other
+    coarse transition probabilities.
+
+    Method
+    ------
+    Rows and columns are mapped from detailed states to coarse buckets. Row mass
+    is averaged equally across detailed origin states in the same bucket and
+    destination probabilities are summed into destination buckets.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Row-stochastic detailed transition matrix.
+    state_to_bucket:
+        Mapping from every detailed state to a coarse bucket label.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Row-stochastic bucket-level transition matrix.
+
+    Raises
+    ------
+    ValueError
+        Raised when one or more states lack bucket mappings.
+
+    Notes
+    -----
+    Equal weighting is a transparent default. For production use, replace it
+    with exposure-weighted or state-occupancy-weighted aggregation.
+
+    Edge Cases
+    ----------
+    Buckets containing one detailed state are copied directly.
+
+    References
+    ----------
+    - IFRS Foundation, "IFRS 9 Financial Instruments."
+    - Kemeny, J. G., and Snell, J. L. (1976), *Finite Markov Chains*.
+    """
+
+    matrix = _as_square_transition_matrix(transition_matrix)
+    missing = [state for state in matrix.index if state not in state_to_bucket]
+    if missing:
+        raise ValueError(f"Missing bucket mapping for states: {missing}")
+    buckets = tuple(dict.fromkeys(state_to_bucket[state] for state in matrix.index))
+    aggregated = pd.DataFrame(0.0, index=buckets, columns=buckets)
+    for origin_bucket in buckets:
+        origin_states = [state for state in matrix.index if state_to_bucket[state] == origin_bucket]
+        row = matrix.loc[origin_states].mean(axis=0)
+        for destination_state, probability in row.items():
+            aggregated.loc[origin_bucket, state_to_bucket[destination_state]] += float(probability)
+    aggregated = aggregated.div(aggregated.sum(axis=1).replace(0.0, 1.0), axis=0)
+    return aggregated
+
+
+def stage_transition_matrix(
+    transition_matrix: pd.DataFrame,
+    stage_map: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Aggregate delinquency migration to IFRS-style stage movement.
+
+    Summary
+    -------
+    Explain stage migration through a Markov transition matrix rather than only
+    through realised reporting summaries.
+
+    Method
+    ------
+    The default map treats current loans as Stage 1, early and serious arrears
+    as Stage 2, default as Stage 3, and prepay/maturity as closed. The detailed
+    transition matrix is aggregated to these buckets.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Detailed Markov transition matrix.
+    stage_map:
+        Optional custom state-to-stage mapping.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Stage-level transition matrix.
+
+    Raises
+    ------
+    ValueError
+        Raised when required mappings are missing.
+
+    Notes
+    -----
+    This is a modelling explanation of migration pressure, not an accounting
+    policy. Actual IFRS 9 stage allocation also uses origination deterioration,
+    forbearance, and other policy criteria.
+
+    Edge Cases
+    ----------
+    Custom maps can exclude a separate closed bucket by mapping prepayment into
+    another terminal label.
+
+    References
+    ----------
+    - IFRS Foundation, "IFRS 9 Financial Instruments."
+    - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for
+      the Term Structure of Credit Risk Spreads."
+    """
+
+    mapping = dict(
+        stage_map
+        or {
+            "current": "stage_1",
+            "dpd_1_29": "stage_2",
+            "dpd_30_89": "stage_2",
+            "default": "stage_3",
+            "prepay_mature": "closed",
+        }
+    )
+    return aggregate_transition_matrix(transition_matrix, mapping)
+
+
 def n_step_transition_matrix(transition_matrix: pd.DataFrame, n_steps: int) -> pd.DataFrame:
     """Raise a transition matrix to a multi-period horizon.
 
@@ -730,6 +1581,181 @@ def transition_generator(transition_matrix: pd.DataFrame, step_length: float = 1
     identity = np.eye(len(matrix), dtype=float)
     generator = (matrix.to_numpy(dtype=float) - identity) / float(step_length)
     return pd.DataFrame(generator, index=matrix.index, columns=matrix.columns)
+
+
+def matrix_log_generator(
+    transition_matrix: pd.DataFrame,
+    step_length: float = 1.0,
+    tolerance: float = 1e-8,
+) -> GeneratorEmbeddingDiagnostics:
+    """Estimate a continuous-time generator candidate using a matrix logarithm.
+
+    Summary
+    -------
+    Compute `Q = log(P) / dt` and report whether the result is a valid
+    continuous-time Markov-chain generator.
+
+    Method
+    ------
+    A continuous-time Markov chain satisfies `P(dt) = exp(dt Q)`. The formal
+    inverse is therefore `Q = log(P(dt)) / dt`. The function computes the
+    principal matrix logarithm, drops negligible imaginary parts, reconstructs
+    `exp(dt Q)`, and checks the generator constraints: rows sum to zero,
+    off-diagonal entries are non-negative transition intensities, and diagonal
+    entries are non-positive exit rates.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Empirical or modelled row-stochastic one-period transition matrix.
+    step_length:
+        Length of the period represented by `transition_matrix`.
+    tolerance:
+        Numerical tolerance for imaginary parts, row sums, and rate signs.
+
+    Returns
+    -------
+    GeneratorEmbeddingDiagnostics
+        Candidate generator, validity flag, reconstruction error, and diagnostic
+        messages explaining whether the empirical matrix appears embeddable.
+
+    Raises
+    ------
+    ValueError
+        Raised when the transition matrix is invalid, `step_length <= 0`, or
+        `tolerance <= 0`.
+
+    Notes
+    -----
+    This is intentionally diagnostic rather than the default generator
+    estimator. Empirical credit matrices can contain sampling noise, absorbing
+    rows, or zero entries that make the matrix logarithm produce negative
+    off-diagonal rates. The simple `(P - I) / dt` generator remains the stable
+    baseline in this lab; the matrix logarithm is useful when the fitted matrix
+    passes the generator checks.
+
+    Edge Cases
+    ----------
+    Absorbing states can produce singular transition matrices. `scipy.logm`
+    may still return a candidate, but validity is determined by the generator
+    checks rather than by successful numerical evaluation alone.
+
+    References
+    ----------
+    - Israel, R. B., Rosenthal, J. S., and Wei, J. Z. (2001), "Finding
+      Generators for Markov Chains via Empirical Transition Matrices, with
+      Applications to Credit Ratings."
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    """
+
+    if step_length <= 0:
+        raise ValueError("step_length must be positive.")
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+
+    matrix = _as_square_transition_matrix(transition_matrix)
+    raw_log = logm(matrix.to_numpy(dtype=float)) / float(step_length)
+    max_imaginary = float(np.max(np.abs(np.imag(raw_log)))) if raw_log.size else 0.0
+    generator_array = np.real(raw_log)
+
+    off_diagonal = generator_array.copy()
+    np.fill_diagonal(off_diagonal, np.nan)
+    min_off_diagonal = float(np.nanmin(off_diagonal))
+    row_sum_abs = float(np.max(np.abs(generator_array.sum(axis=1))))
+    diagonal = np.diag(generator_array)
+    reconstruction = expm(generator_array * float(step_length))
+    reconstruction_error = float(np.max(np.abs(reconstruction - matrix.to_numpy(dtype=float))))
+
+    is_valid = (
+        max_imaginary <= tolerance
+        and min_off_diagonal >= -tolerance
+        and row_sum_abs <= tolerance
+        and bool((diagonal <= tolerance).all())
+    )
+    message = (
+        "matrix logarithm is a valid CTMC generator within tolerance"
+        if is_valid
+        else "matrix logarithm candidate fails CTMC generator checks; use as diagnostic only"
+    )
+    generator = pd.DataFrame(generator_array, index=matrix.index, columns=matrix.columns)
+    return GeneratorEmbeddingDiagnostics(
+        generator=generator,
+        is_valid_generator=is_valid,
+        max_imaginary_part=max_imaginary,
+        min_off_diagonal=min_off_diagonal,
+        max_row_sum_abs=row_sum_abs,
+        reconstruction_error=reconstruction_error,
+        message=message,
+    )
+
+
+def project_generator_to_valid_rates(generator: pd.DataFrame, tolerance: float = 1e-12) -> pd.DataFrame:
+    """Project a generator-like matrix onto valid transition-rate signs.
+
+    Summary
+    -------
+    Convert a noisy generator candidate into a conservative rate matrix by
+    clipping negative off-diagonal entries and resetting diagonals to row exits.
+
+    Method
+    ------
+    Off-diagonal entries below zero are clipped to zero. Each diagonal is then
+    set to the negative sum of the off-diagonal row rates, enforcing zero row
+    sums. This is not a statistical estimator; it is a pragmatic repair step
+    for diagnostics and sensitivity tests.
+
+    Parameters
+    ----------
+    generator:
+        Square generator-like matrix with matching labels.
+    tolerance:
+        Values above `-tolerance` are treated as numerical zero.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Valid CTMC rate matrix with non-negative off-diagonal entries and zero
+        row sums.
+
+    Raises
+    ------
+    ValueError
+        Raised when labels do not match or `tolerance < 0`.
+
+    Notes
+    -----
+    Production credit migration work should estimate a generator directly from
+    event-time data or use constrained optimisation. This helper only prevents
+    a failed matrix logarithm from contaminating later diagnostics.
+
+    Edge Cases
+    ----------
+    Rows with no positive off-diagonal rates become absorbing rows.
+
+    References
+    ----------
+    - Israel, R. B., Rosenthal, J. S., and Wei, J. Z. (2001), "Finding
+      Generators for Markov Chains via Empirical Transition Matrices, with
+      Applications to Credit Ratings."
+    """
+
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative.")
+    if list(generator.index) != list(generator.columns):
+        raise ValueError("Generator index and columns must contain the same states in the same order.")
+    rates = generator.astype(float).copy()
+    values = rates.to_numpy(dtype=float)
+    for idx in range(values.shape[0]):
+        for jdx in range(values.shape[1]):
+            if idx == jdx:
+                continue
+            if values[idx, jdx] < 0 and values[idx, jdx] >= -tolerance:
+                values[idx, jdx] = 0.0
+            elif values[idx, jdx] < 0:
+                values[idx, jdx] = 0.0
+        values[idx, idx] = -float(values[idx, np.arange(values.shape[1]) != idx].sum())
+    return pd.DataFrame(values, index=rates.index, columns=rates.columns)
 
 
 def absorption_summary(
@@ -845,7 +1871,7 @@ def dirichlet_transition_energy(
         are used.
     symmetrize:
         Whether to use a symmetric jump conductance. This is the recommended
-        setting for this portfolio project because credit migration is usually
+        setting for this lab because credit migration is usually
         non-reversible.
 
     Returns
@@ -906,3 +1932,293 @@ def dirichlet_transition_energy(
         conductance = m[:, None] * p
     energy = 0.5 * float(np.sum(conductance * diffs * diffs))
     return energy
+
+
+def reversibility_diagnostics(
+    transition_matrix: pd.DataFrame,
+    weights: Mapping[str, float] | pd.Series | None = None,
+) -> pd.DataFrame:
+    """Diagnose detailed-balance failures in a finite credit migration matrix.
+
+    Summary
+    -------
+    Compare forward and reverse probability flows across pairs of credit states.
+
+    Method
+    ------
+    For a reference state distribution `m`, detailed balance requires
+    `m_i P_ij = m_j P_ji` for every state pair. The function computes these two
+    flows, their absolute imbalance, and a relative imbalance ratio for each
+    unordered state pair.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Row-stochastic transition matrix.
+    weights:
+        Optional reference distribution over states. Uniform weights are used
+        when omitted.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Pair-level reversibility diagnostics.
+
+    Raises
+    ------
+    ValueError
+        Raised when the matrix or weights are invalid.
+
+    Notes
+    -----
+    Credit migration is often non-reversible because deterioration and repair
+    are not mirror-image economic mechanisms. This diagnostic makes that
+    asymmetry visible before a symmetric energy is used for score smoothness.
+
+    Edge Cases
+    ----------
+    Absorbing states generally create large balance failures unless the
+    reference distribution already puts all mass in terminal states.
+
+    References
+    ----------
+    - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and
+      Rating Drift with Continuous Observations."
+    - Fukushima, Oshima, and Takeda, "Dirichlet Forms and Symmetric Markov
+      Processes", 2nd revised and extended edition, 2011.
+    """
+
+    matrix = _as_square_transition_matrix(transition_matrix)
+    states = list(matrix.index)
+    if weights is None:
+        reference = pd.Series(1.0 / len(states), index=states, dtype=float)
+    else:
+        reference = pd.Series(weights, dtype=float).reindex(states)
+        if reference.isna().any():
+            missing = reference.index[reference.isna()].tolist()
+            raise ValueError(f"Missing state weights for: {missing}")
+        if (reference < 0).any() or float(reference.sum()) <= 0:
+            raise ValueError("State weights must be non-negative and have positive total mass.")
+        reference = reference / float(reference.sum())
+
+    rows: list[dict[str, object]] = []
+    for i, origin in enumerate(states):
+        for destination in states[i + 1 :]:
+            forward_flow = float(reference.loc[origin] * matrix.loc[origin, destination])
+            reverse_flow = float(reference.loc[destination] * matrix.loc[destination, origin])
+            denominator = max(abs(forward_flow) + abs(reverse_flow), 1e-12)
+            rows.append(
+                {
+                    "state_i": origin,
+                    "state_j": destination,
+                    "flow_i_to_j": forward_flow,
+                    "flow_j_to_i": reverse_flow,
+                    "absolute_imbalance": abs(forward_flow - reverse_flow),
+                    "relative_imbalance": abs(forward_flow - reverse_flow) / denominator,
+                }
+            )
+    return pd.DataFrame(rows).sort_values("absolute_imbalance", ascending=False).reset_index(drop=True)
+
+
+def score_smoothness_diagnostics(
+    transition_matrix: pd.DataFrame,
+    state_values: Mapping[str, float] | pd.Series,
+    weights: Mapping[str, float] | pd.Series | None = None,
+    symmetrize: bool = True,
+    top_n: int = 10,
+) -> dict[str, object]:
+    """Explain which migration edges drive score roughness.
+
+    Summary
+    -------
+    Decompose the finite-state Dirichlet energy into edge-level contributions.
+
+    Method
+    ------
+    The function builds the same conductance used by
+    `dirichlet_transition_energy`, computes squared score differences across
+    edges, and reports the largest contributors. High-contribution edges show
+    where a score or stage scale changes sharply across commonly observed
+    migrations.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Row-stochastic transition matrix.
+    state_values:
+        Numeric score, stage, or risk scale by state.
+    weights:
+        Optional state reference distribution.
+    symmetrize:
+        Whether to use symmetric conductance.
+    top_n:
+        Number of largest edge contributions to return.
+
+    Returns
+    -------
+    dict[str, object]
+        Total energy, edge table, and a plain-language interpretation string.
+
+    Raises
+    ------
+    ValueError
+        Raised when matrix, scores, weights, or `top_n` are invalid.
+
+    Notes
+    -----
+    This turns the abstract energy into a model-review question: are the biggest
+    score jumps located where observed borrower movements justify them?
+
+    Edge Cases
+    ----------
+    Constant scores return zero energy and an edge table with zero
+    contributions.
+
+    References
+    ----------
+    - Fukushima, Oshima, and Takeda, "Dirichlet Forms and Symmetric Markov
+      Processes", 2nd revised and extended edition, 2011.
+    - Beurling and Deny, "Dirichlet Spaces", 1958-1959.
+    """
+
+    if top_n <= 0:
+        raise ValueError("top_n must be positive.")
+    matrix = _as_square_transition_matrix(transition_matrix)
+    states = list(matrix.index)
+    values = pd.Series(state_values, dtype=float).reindex(states)
+    if values.isna().any():
+        missing = values.index[values.isna()].tolist()
+        raise ValueError(f"Missing state values for: {missing}")
+    if weights is None:
+        reference = pd.Series(1.0 / len(states), index=states, dtype=float)
+    else:
+        reference = pd.Series(weights, dtype=float).reindex(states)
+        if reference.isna().any():
+            missing = reference.index[reference.isna()].tolist()
+            raise ValueError(f"Missing state weights for: {missing}")
+        if (reference < 0).any() or float(reference.sum()) <= 0:
+            raise ValueError("State weights must be non-negative and have positive total mass.")
+        reference = reference / float(reference.sum())
+
+    p = matrix.to_numpy(dtype=float)
+    m = reference.to_numpy(dtype=float)
+    f = values.to_numpy(dtype=float)
+    conductance = 0.5 * (m[:, None] * p + m[None, :] * p.T) if symmetrize else m[:, None] * p
+    rows: list[dict[str, object]] = []
+    for i, origin in enumerate(states):
+        for j, destination in enumerate(states):
+            if i == j:
+                continue
+            contribution = 0.5 * float(conductance[i, j] * (f[i] - f[j]) ** 2)
+            if contribution <= 0:
+                continue
+            rows.append(
+                {
+                    "origin_state": origin,
+                    "destination_state": destination,
+                    "conductance": float(conductance[i, j]),
+                    "score_difference": float(f[i] - f[j]),
+                    "energy_contribution": contribution,
+                }
+            )
+    edge_table = pd.DataFrame(rows)
+    if not edge_table.empty:
+        edge_table = edge_table.sort_values("energy_contribution", ascending=False).head(top_n).reset_index(drop=True)
+    total_energy = dirichlet_transition_energy(matrix, values, reference, symmetrize=symmetrize)
+    return {
+        "total_energy": total_energy,
+        "top_edges": edge_table,
+        "interpretation": "Large contributions indicate score jumps across migration edges that exchange material probability mass.",
+    }
+
+
+def regularize_state_scores(
+    transition_matrix: pd.DataFrame,
+    state_values: Mapping[str, float] | pd.Series,
+    alpha: float = 1.0,
+    weights: Mapping[str, float] | pd.Series | None = None,
+) -> pd.Series:
+    """Smooth a state score over the observed migration graph.
+
+    Summary
+    -------
+    Penalise excessive roughness in a rating, stage, or credit-quality scale
+    while staying close to the original state values.
+
+    Method
+    ------
+    The function builds a symmetric transition conductance and graph Laplacian
+    `L`. It then solves `(W + alpha L) f_smooth = W f_raw`, where `W` is the
+    diagonal reference-measure matrix. The solution is the score closest to the
+    original scale after penalising large changes across commonly observed
+    migration edges.
+
+    Parameters
+    ----------
+    transition_matrix:
+        Row-stochastic transition matrix.
+    state_values:
+        Raw numeric state scores.
+    alpha:
+        Non-negative smoothness penalty. `0` returns the original scores.
+    weights:
+        Optional state reference distribution.
+
+    Returns
+    -------
+    pandas.Series
+        Smoothed scores by state.
+
+    Raises
+    ------
+    ValueError
+        Raised when inputs are invalid or `alpha < 0`.
+
+    Notes
+    -----
+    This is the V5 Dirichlet-form regularisation layer. It is a diagnostic
+    model-design tool, not a claim that the true credit-risk process is
+    reversible or symmetric.
+
+    Edge Cases
+    ----------
+    If `alpha=0`, no smoothing is applied. If all raw scores are constant, the
+    result remains constant for every `alpha`.
+
+    References
+    ----------
+    - Fukushima, Oshima, and Takeda, "Dirichlet Forms and Symmetric Markov
+      Processes", 2nd revised and extended edition, 2011.
+    - Beurling and Deny, "Dirichlet Spaces", 1958-1959.
+    """
+
+    if alpha < 0:
+        raise ValueError("alpha must be non-negative.")
+    matrix = _as_square_transition_matrix(transition_matrix)
+    states = list(matrix.index)
+    values = pd.Series(state_values, dtype=float).reindex(states)
+    if values.isna().any():
+        missing = values.index[values.isna()].tolist()
+        raise ValueError(f"Missing state values for: {missing}")
+    if alpha == 0:
+        return values.copy()
+    if weights is None:
+        reference = pd.Series(1.0 / len(states), index=states, dtype=float)
+    else:
+        reference = pd.Series(weights, dtype=float).reindex(states)
+        if reference.isna().any():
+            missing = reference.index[reference.isna()].tolist()
+            raise ValueError(f"Missing state weights for: {missing}")
+        if (reference < 0).any() or float(reference.sum()) <= 0:
+            raise ValueError("State weights must be non-negative and have positive total mass.")
+        reference = reference / float(reference.sum())
+
+    p = matrix.to_numpy(dtype=float)
+    m = reference.to_numpy(dtype=float)
+    conductance = 0.5 * (m[:, None] * p + m[None, :] * p.T)
+    laplacian = np.diag(conductance.sum(axis=1)) - conductance
+    weight_matrix = np.diag(m)
+    lhs = weight_matrix + float(alpha) * laplacian
+    rhs = weight_matrix @ values.to_numpy(dtype=float)
+    smooth = np.linalg.solve(lhs, rhs)
+    return pd.Series(smooth, index=states, name="smoothed_score")

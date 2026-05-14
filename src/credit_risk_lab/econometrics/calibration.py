@@ -25,7 +25,7 @@ Primary references
 - Van Calster et al. (2019), "Calibration: the Achilles heel of predictive
   analytics."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - Bin calibration uses quantile or fixed-width buckets rather than smoother
   reliability curves.
@@ -291,3 +291,169 @@ def intercept_shift_recalibration(
         else:
             low = shift
     return calibrated.clip(1e-8, 1 - 1e-8), float(shift)
+
+
+def segment_calibration_drift(
+    reference: pd.DataFrame,
+    current: pd.DataFrame,
+    segment_column: str,
+    prediction_column: str,
+    observed_column: str,
+) -> pd.DataFrame:
+    """Compare segment-level calibration gaps across two samples.
+
+    Summary
+    -------
+    Detect whether calibration has deteriorated differently by borrower,
+    product, region, or vintage segment.
+
+    Method
+    ------
+    The function computes count, mean prediction, observed event rate, and
+    calibration gap for each segment in reference and current samples. It then
+    joins the two tables and reports the change in calibration gap.
+
+    Parameters
+    ----------
+    reference:
+        Reference scored sample.
+    current:
+        Current scored sample.
+    segment_column:
+        Segment identifier.
+    prediction_column:
+        Predicted probability column.
+    observed_column:
+        Observed binary outcome column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Segment-level calibration drift table.
+
+    Raises
+    ------
+    KeyError
+        Raised when required columns are missing.
+
+    Notes
+    -----
+    Segment drift is useful before adding segment-specific calibration or
+    hierarchical models. A stable pooled model should not show large unexplained
+    segment calibration shifts.
+
+    Edge Cases
+    ----------
+    Segments appearing in only one sample are retained with missing values for
+    the other sample.
+
+    References
+    ----------
+    - Van Calster et al. (2019), "Calibration: the Achilles heel of predictive
+      analytics."
+    """
+
+    required = [segment_column, prediction_column, observed_column]
+    for name, frame in {"reference": reference, "current": current}.items():
+        missing = [column for column in required if column not in frame.columns]
+        if missing:
+            raise KeyError(f"Missing {name} calibration drift columns: {missing}")
+
+    def _summary(frame: pd.DataFrame, suffix: str) -> pd.DataFrame:
+        table = (
+            frame.groupby(segment_column, as_index=False)
+            .agg(
+                **{
+                    f"count_{suffix}": (observed_column, "size"),
+                    f"mean_prediction_{suffix}": (prediction_column, "mean"),
+                    f"observed_rate_{suffix}": (observed_column, "mean"),
+                }
+            )
+            .rename(columns={segment_column: "segment"})
+        )
+        table[f"calibration_gap_{suffix}"] = table[f"observed_rate_{suffix}"] - table[f"mean_prediction_{suffix}"]
+        return table
+
+    output = _summary(reference, "reference").merge(_summary(current, "current"), on="segment", how="outer")
+    output["calibration_gap_change"] = output["calibration_gap_current"] - output["calibration_gap_reference"]
+    return output.sort_values("segment").reset_index(drop=True)
+
+
+def isotonic_recalibration(predictions: pd.Series, observed: pd.Series) -> pd.Series:
+    """Recalibrate probabilities with a monotone isotonic curve.
+
+    Summary
+    -------
+    Fit a non-parametric monotone calibration map from raw probabilities to
+    observed default rates.
+
+    Method
+    ------
+    The function sorts observations by prediction and applies the pool adjacent
+    violators algorithm to the observed binary outcomes. The fitted monotone
+    rates are then returned in the original observation order.
+
+    Parameters
+    ----------
+    predictions:
+        Raw predicted probabilities.
+    observed:
+        Binary realised outcomes aligned to `predictions`.
+
+    Returns
+    -------
+    pandas.Series
+        Monotone isotonic recalibrated probabilities.
+
+    Raises
+    ------
+    ValueError
+        Raised when inputs are empty or lengths do not match.
+
+    Notes
+    -----
+    Isotonic calibration is more flexible than an intercept shift, but it can
+    overfit small validation samples. It should be compared against simpler
+    calibration overlays.
+
+    Edge Cases
+    ----------
+    Tied predictions are handled by sorting order; the returned values remain
+    monotone in sorted prediction order.
+
+    References
+    ----------
+    - Barlow, Bartholomew, Bremner, and Brunk (1972), "Statistical Inference
+      Under Order Restrictions."
+    - Van Calster et al. (2019), "Calibration: the Achilles heel of predictive
+      analytics."
+    """
+
+    if len(predictions) != len(observed):
+        raise ValueError("predictions and observed must have the same length.")
+    data = pd.DataFrame({"prediction": predictions.astype(float), "observed": observed.astype(int)}).dropna()
+    if data.empty:
+        raise ValueError("No complete observations are available for isotonic recalibration.")
+    data = data.sort_values("prediction").reset_index().rename(columns={"index": "_original_index"})
+
+    blocks: list[dict[str, float]] = []
+    for idx, row in data.iterrows():
+        blocks.append({"sum": float(row["observed"]), "weight": 1.0, "start": float(idx), "end": float(idx)})
+        while len(blocks) >= 2:
+            left = blocks[-2]["sum"] / blocks[-2]["weight"]
+            right = blocks[-1]["sum"] / blocks[-1]["weight"]
+            if left <= right:
+                break
+            merged = {
+                "sum": blocks[-2]["sum"] + blocks[-1]["sum"],
+                "weight": blocks[-2]["weight"] + blocks[-1]["weight"],
+                "start": blocks[-2]["start"],
+                "end": blocks[-1]["end"],
+            }
+            blocks = blocks[:-2] + [merged]
+
+    fitted = np.zeros(len(data), dtype=float)
+    for block in blocks:
+        fitted[int(block["start"]) : int(block["end"]) + 1] = block["sum"] / block["weight"]
+    calibrated = pd.Series(fitted, index=data["_original_index"]).reindex(predictions.index)
+    return calibrated.clip(0.0, 1.0).rename("isotonic_probability")

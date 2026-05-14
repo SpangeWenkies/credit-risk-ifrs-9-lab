@@ -1,4 +1,4 @@
-"""Reporting helpers for the recruiter-facing credit risk lab outputs."""
+"""Reporting helpers for credit risk lab outputs."""
 
 from __future__ import annotations
 

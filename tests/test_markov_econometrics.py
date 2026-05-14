@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.linalg import expm
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -16,10 +17,22 @@ from credit_risk_lab.econometrics.markov import (  # noqa: E402
     ABSORBING_STATES,
     CREDIT_STATES,
     absorption_summary,
+    assign_macro_regime,
     build_transition_panel,
+    build_markov_scenario_matrices,
+    compare_markov_to_survival_pd,
+    covariate_markov_default_pd,
     dirichlet_transition_energy,
+    fit_covariate_transition_model,
+    fit_macro_regime_transition_matrices,
     fit_markov_transition_model,
+    matrix_log_generator,
     n_step_transition_matrix,
+    predict_covariate_transition_probabilities,
+    regularize_state_scores,
+    reversibility_diagnostics,
+    score_smoothness_diagnostics,
+    stage_transition_matrix,
     transition_generator,
 )
 
@@ -123,3 +136,66 @@ def test_semigroup_absorption_and_dirichlet_energy_diagnostics() -> None:
     )
     assert constant_energy == 0.0
     assert ordered_energy > 0.0
+
+    stage_matrix = stage_transition_matrix(transition_matrix)
+    np.testing.assert_allclose(stage_matrix.sum(axis=1).to_numpy(), np.ones(len(stage_matrix)))
+    smooth = regularize_state_scores(
+        transition_matrix,
+        {"current": 1.0, "dpd_1_29": 3.0, "dpd_30_89": 4.0, "default": 6.0, "prepay_mature": 0.0},
+        alpha=0.5,
+    )
+    assert smooth.loc["dpd_1_29"] < 3.0
+    diagnostics = score_smoothness_diagnostics(transition_matrix, smooth)
+    assert diagnostics["total_energy"] >= 0.0
+    reversibility = reversibility_diagnostics(transition_matrix)
+    assert not reversibility.empty
+
+
+def test_matrix_log_generator_and_macro_scenario_matrices() -> None:
+    q = pd.DataFrame(
+        [
+            [-0.30, 0.20, 0.05, 0.05, 0.00],
+            [0.10, -0.35, 0.15, 0.10, 0.00],
+            [0.02, 0.08, -0.45, 0.30, 0.05],
+            [0.00, 0.00, 0.00, 0.00, 0.00],
+            [0.00, 0.00, 0.00, 0.00, 0.00],
+        ],
+        index=CREDIT_STATES,
+        columns=CREDIT_STATES,
+    )
+    p = pd.DataFrame(np.asarray(expm(q.to_numpy())), index=CREDIT_STATES, columns=CREDIT_STATES)
+    diagnostics = matrix_log_generator(p)
+    assert diagnostics.is_valid_generator
+    np.testing.assert_allclose(diagnostics.generator.sum(axis=1).to_numpy(), np.zeros(len(CREDIT_STATES)), atol=1e-7)
+
+    dataset = generate_portfolio_timeseries(PortfolioConfig(random_seed=61, periods=9, num_borrowers=75, num_loans=130))
+    markov_model = fit_markov_transition_model(dataset.performance, smoothing=0.1)
+    labelled = assign_macro_regime(markov_model.transition_panel, "unemployment_rate")
+    regime_matrices = fit_macro_regime_transition_matrices(labelled, smoothing=0.1)
+    scenarios = build_markov_scenario_matrices(regime_matrices, markov_model.transition_matrix)
+    assert set(scenarios) == {"baseline", "downside", "upside"}
+    for matrix in scenarios.values():
+        np.testing.assert_allclose(matrix.sum(axis=1).to_numpy(), np.ones(len(CREDIT_STATES)))
+
+
+def test_covariate_markov_model_predicts_and_compares_to_survival_pd() -> None:
+    dataset = generate_portfolio_timeseries(PortfolioConfig(random_seed=67, periods=10, num_borrowers=90, num_loans=160))
+    markov_model = fit_markov_transition_model(dataset.performance, smoothing=0.1)
+    transition_panel = markov_model.transition_panel.copy()
+    model = fit_covariate_transition_model(
+        transition_panel,
+        feature_columns=["rating_rank", "days_past_due", "ltv", "unemployment_rate"],
+        categorical_columns=["segment"],
+        min_rows=5,
+        smoothing=0.1,
+    )
+    sample = transition_panel.head(15)
+    probabilities = predict_covariate_transition_probabilities(model, sample)
+    assert not probabilities.empty
+    row_sums = probabilities.groupby("row_id")["probability"].sum()
+    np.testing.assert_allclose(row_sums.to_numpy(), np.ones(len(row_sums)))
+
+    default_pd = covariate_markov_default_pd(model, sample, horizon_steps=4)
+    assert default_pd.between(0.0, 1.0).all()
+    comparison = compare_markov_to_survival_pd(sample.assign(pd_12m=0.05), "pd_12m", 4, covariate_model=model)
+    assert {"markov_pd", "pd_difference", "absolute_pd_difference"}.issubset(comparison.columns)

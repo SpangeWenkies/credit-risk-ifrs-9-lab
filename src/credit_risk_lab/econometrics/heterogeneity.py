@@ -16,7 +16,7 @@ Primary references
 - Gelman and Hill, "Data Analysis Using Regression and Multilevel/Hierarchical
   Models."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The module does not fit a full hierarchical Bayesian model in v1.
 """
@@ -228,3 +228,77 @@ def coefficient_stability_table(segment_models: dict[str, object]) -> pd.DataFra
         return pd.DataFrame(columns=["segment", "feature", "coefficient", "coefficient_range"])
     ranges = table.groupby("feature")["coefficient"].agg(lambda values: float(values.max() - values.min())).rename("coefficient_range")
     return table.merge(ranges, on="feature", how="left").sort_values(["feature", "segment"]).reset_index(drop=True)
+
+
+def empirical_bayes_segment_shrinkage(
+    frame: pd.DataFrame,
+    segment_column: str,
+    observed_column: str,
+    prior_strength: float = 50.0,
+) -> pd.DataFrame:
+    """Shrink sparse segment event rates toward the portfolio mean.
+
+    Summary
+    -------
+    Provide a lightweight hierarchical-style diagnostic for heterogeneous
+    segment default rates.
+
+    Method
+    ------
+    The portfolio event rate is treated as a prior mean with `prior_strength`
+    pseudo-observations. Each segment's observed event count and exposure count
+    are combined with that prior to produce a shrunk event-rate estimate.
+
+    Parameters
+    ----------
+    frame:
+        Input data frame.
+    segment_column:
+        Segment identifier.
+    observed_column:
+        Binary observed outcome.
+    prior_strength:
+        Number of pseudo-observations assigned to the portfolio mean.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Segment observed rates, shrunk rates, and shrinkage amount.
+
+    Raises
+    ------
+    KeyError
+        Raised when required columns are missing.
+    ValueError
+        Raised when `prior_strength < 0`.
+
+    Notes
+    -----
+    This is not a full random-effects model. It is a stable first check for
+    whether raw segment rates are dominated by sparse sample noise.
+
+    Edge Cases
+    ----------
+    With `prior_strength=0`, the shrunk rate equals the observed segment rate.
+
+    References
+    ----------
+    - Gelman and Hill, "Data Analysis Using Regression and Multilevel/
+      Hierarchical Models."
+    """
+
+    if prior_strength < 0:
+        raise ValueError("prior_strength must be non-negative.")
+    missing = [column for column in (segment_column, observed_column) if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing shrinkage columns: {missing}")
+    portfolio_rate = float(frame[observed_column].astype(int).mean())
+    table = (
+        frame.groupby(segment_column, as_index=False)
+        .agg(count=(observed_column, "size"), events=(observed_column, "sum"))
+        .rename(columns={segment_column: "segment"})
+    )
+    table["observed_rate"] = table["events"] / table["count"].clip(lower=1)
+    table["shrunk_rate"] = (table["events"] + prior_strength * portfolio_rate) / (table["count"] + prior_strength)
+    table["shrinkage"] = table["shrunk_rate"] - table["observed_rate"]
+    return table.sort_values("segment").reset_index(drop=True)

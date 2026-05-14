@@ -19,7 +19,7 @@ Primary references
 - Imbens and Rubin, "Causal Inference for Statistics, Social, and Biomedical
   Sciences."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The module creates audit tables and deterministic stress comparisons rather
   than estimating causal treatment effects.
@@ -69,7 +69,7 @@ def variable_identification_audit(
 
     Notes
     -----
-    This is useful interview material: it shows that macro and behavioural
+    This is useful model-risk material: it shows that macro and behavioural
     predictors can be valid for prediction without being structural causal
     effects.
 
@@ -167,3 +167,79 @@ def policy_shock_sensitivity(
     result = pd.concat([baseline, shocked], axis=1)
     result[f"delta_{output_column}"] = result[f"shocked_{output_column}"] - result[f"baseline_{output_column}"]
     return result
+
+
+def omitted_variable_sensitivity(
+    full_model_result,
+    restricted_model_result,
+    coefficient_name: str,
+) -> dict[str, float]:
+    """Compare a coefficient across full and restricted specifications.
+
+    Summary
+    -------
+    Quantify how sensitive a selected coefficient is to adding or removing
+    controls.
+
+    Method
+    ------
+    The function reads the named coefficient from a full model and a restricted
+    model, then reports the level change and percentage change relative to the
+    restricted specification.
+
+    Parameters
+    ----------
+    full_model_result:
+        Fitted model result containing the coefficient after controls are added.
+    restricted_model_result:
+        Fitted model result containing the coefficient before controls are
+        added.
+    coefficient_name:
+        Coefficient to compare.
+
+    Returns
+    -------
+    dict[str, float]
+        Restricted coefficient, full coefficient, absolute change, and relative
+        change.
+
+    Raises
+    ------
+    KeyError
+        Raised when the coefficient is absent from either model.
+
+    Notes
+    -----
+    This is not a causal proof. It is a practical omitted-variable diagnostic:
+    if a coefficient changes sharply after adding controls, structural
+    interpretation is weaker and prediction stability should be checked.
+
+    Edge Cases
+    ----------
+    If the restricted coefficient is zero, relative change is returned as
+    infinity when the full coefficient differs.
+
+    References
+    ----------
+    - Angrist, J. D., and Pischke, J.-S., "Mostly Harmless Econometrics."
+    - Oster, E. (2019), "Unobservable Selection and Coefficient Stability:
+      Theory and Evidence."
+    """
+
+    if coefficient_name not in restricted_model_result.params.index:
+        raise KeyError(f"Coefficient missing from restricted model: {coefficient_name}")
+    if coefficient_name not in full_model_result.params.index:
+        raise KeyError(f"Coefficient missing from full model: {coefficient_name}")
+    restricted = float(restricted_model_result.params[coefficient_name])
+    full = float(full_model_result.params[coefficient_name])
+    change = full - restricted
+    if restricted == 0:
+        relative = float("inf") if change != 0 else 0.0
+    else:
+        relative = change / abs(restricted)
+    return {
+        "restricted_coefficient": restricted,
+        "full_coefficient": full,
+        "absolute_change": change,
+        "relative_change": float(relative),
+    }

@@ -14,8 +14,8 @@ Assumptions
 - Discrete-time survival modelling is performed on quarterly panel data rather
   than monthly panels to keep the synthetic portfolio readable while preserving
   the core hazard-modelling logic discussed by Singer and Willett.
-- IFRS 9 outputs are simplified portfolio artefacts intended for a portfolio
-  project rather than production accounting books.
+- IFRS 9 outputs are simplified modelling artefacts rather than production
+  accounting books.
 
 Primary references
 ------------------
@@ -25,12 +25,12 @@ Primary references
 - IFRS Foundation, "IFRS 9 Financial Instruments."
   https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The dataclasses deliberately store rich intermediate tables so the notebook,
   example scripts, and validation pack can inspect internal calculations.
-- Type annotations prefer clarity over very strict runtime protocols because
-  the repository is educational and recruiter-facing.
+- Type annotations prefer clarity over very strict runtime protocols so the
+  modelling interfaces remain easy to inspect.
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ Assumptions
 -----------
 - Binary outcomes are coded as 0/1.
 - Multinomial outcomes are categorical state labels.
-- The functions are intended for challenger and educational analysis, not
+- The functions are intended for challenger and diagnostic analysis, not
   production model deployment.
 
 Primary references
@@ -16,7 +16,7 @@ Primary references
 - McFadden (1974), "Conditional Logit Analysis of Qualitative Choice Behavior."
 - Cox (1958), "Two Further Applications of a Model for Binary Regression."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The module uses `statsmodels` GLM/Logit-style estimators without advanced
   regularisation.

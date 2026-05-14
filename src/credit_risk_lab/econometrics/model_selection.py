@@ -15,7 +15,7 @@ Primary references
 - Schwarz (1978), "Estimating the Dimension of a Model."
 - Brier (1950), "Verification of Forecasts Expressed in Terms of Probability."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - Candidate fitting uses binary GLMs from the limited-dependent-variable module.
 """

@@ -19,7 +19,7 @@ Primary references
 - ECB Banking Supervision, "Internal models."
   https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - No separate fitting step is performed.
 - The formula is intentionally hand-crafted so differences versus the primary

@@ -1,103 +1,203 @@
 # Methodology Notes
 
-## Why These Methods
+This document records the modelling choices behind the lab. The repo is a
+toolbox: start with transparent baseline models, run diagnostics, then add
+extensions only when the data and validation evidence justify them.
 
-### Discrete-time survival PD
+## Discrete-Time Survival PD
 
-The root repo uses a pooled-logit discrete-time hazard model because it fits naturally with quarterly account panels and is much easier to explain in a junior-role interview than a black-box approach.
+The baseline PD model is a pooled-logit discrete-time hazard model. This fits
+quarterly account panels naturally: each loan-quarter row is an interval and
+`default_next_period` is the event indicator.
 
 Reference:
 - Singer, J. D., and Willett, J. B. (1993), "It's About Time: Using Discrete-Time Survival Analysis to Study Duration and the Timing of Events."
   https://journals.sagepub.com/doi/10.3102/10769986018002155
 
-Current simplification:
-- the current version converts a one-quarter hazard into `12m PD` and `lifetime PD` using a constant-hazard approximation.
+Current baseline:
+- estimate a one-quarter hazard,
+- convert it to 12-month and lifetime PD with a constant-hazard approximation.
 
-Planned econometric upgrade:
-- use `src/credit_risk_lab/econometrics/forward_hazard.py` to build a forward hazard path, where future balance, seasoning, and macro variables evolve over time and lifetime PD is built from the full hazard term structure rather than a flat hazard.
+Available upgrade:
+- use `src/credit_risk_lab/econometrics/forward_hazard.py` to construct future
+  loan-quarter rows and combine a non-constant hazard path with
+  `1 - product(1 - h_t)`.
 
-Best extension slots:
-- `src/credit_risk_lab/econometrics/forward_hazard.py`
-- `src/credit_risk_lab/econometrics/macro.py`
+Model-choice rule:
+- keep the constant-hazard baseline if the forward path is effectively flat or
+  less stable out of sample,
+- use the forward path when seasoning, balance, LTV, DTI, or macro projections
+  materially change future hazards.
 
-### IFRS 9 staging and ECL
+## IFRS 9 Staging And ECL
 
-The impairment engine uses a simplified significant-increase-in-credit-risk framework based on delinquency, forbearance, and deterioration versus origination. This is not a production accounting policy, but it is a credible portfolio-project representation of the logic required by IFRS 9.
+The impairment engine uses simplified significant-increase-in-credit-risk logic
+based on delinquency, forbearance, and deterioration versus origination. It is a
+portfolio-level modelling representation, not a production accounting policy.
 
 Reference:
 - IFRS Foundation, "IFRS 9 Financial Instruments."
   https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf
 
-### Validation and governance
+Design choice:
+- macro effects can enter PD through the model or through a management overlay,
+  but the repo should not apply the same macro deterioration twice without
+  explicitly labelling the second effect as judgemental.
 
-The validation pack is organised around model-risk governance rather than only predictive accuracy. That is why it includes benchmark comparison, drift diagnostics, sensitivity analysis, and memo rendering.
+## Validation And Governance
 
-Reference:
+The validation pack separates performance, stability, drift, sensitivity, and
+benchmark comparison. This is broader than predictive accuracy and aligns with
+credit model-governance expectations.
+
+References:
 - EBA, "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures."
   https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/model-validation/guidelines-pd-estimation-lgd
 - ECB Banking Supervision, "Internal models."
   https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
-
-### Dutch / EU relevance
-
-For Dutch banking roles, the repo should be read through `IFRS 9`, `EBA`, `ECB`, and `DNB` rather than U.S. supervisory letters. That is especially true for PD/LGD/EAD, monitoring, and internal-model governance.
-
-References:
 - EBA, "Guidelines on loan origination and monitoring."
   https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-loan-origination-and-monitoring
-- ECB Banking Supervision, "Internal models."
-  https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
 
-### Actuarial angle
+## Definition Of Default And Monitoring Scope
 
-The actuarial relevance of the repo comes from reserve logic, stress/sensitivity thinking, governance, and internal-model discussion. For Dutch actuarial and insurer roles, `Solvency II` is the right prudential anchor.
+The synthetic generator and Markov module use `90+ DPD / default` as a clear
+default-like state. The relevant EU regulatory anchor is CRR Article 178 and
+the EBA Guidelines on the application of the definition of default. For this
+repo, the regulation is used to structure default definitions, cure/return
+logic, and monitoring evidence. It is not implemented as a full regulatory
+default policy engine.
 
 References:
-- DNB, "Solvency II: General notes."
-  https://www.dnb.nl/en/sector-information/open-book-supervision/open-book-supervision-sectors/insurers/law-and-regulations-insurers/solvency-ii-general-notes/
-- DNB, "Pillar 1: Internal models."
-  https://www.dnb.nl/en/sector-information/open-book-supervision/open-book-supervision-sectors/insurers/solvency-ii-request-overview/pillar-1-internal-models/
-- EIOPA, "Solvency II."
-  https://www.eiopa.europa.eu/browse/regulation-and-policy/solvency-ii_en
+- EBA, "Guidelines on the application of the definition of default."
+  https://www.eba.europa.eu/activities/single-rulebook/regulatory-activities/credit-risk/guidelines-application-definition
+- EBA Interactive Single Rulebook, CRR Article 178.
+  https://www.eba.europa.eu/regulation-and-policy/single-rulebook/interactive-single-rulebook/16022
 
-### Backtesting
+## Prudential Capital Boundary
 
-Probability forecast quality is summarised with the Brier score because the project validates PD-type probabilities rather than raw classifications.
+Basel final reforms, CRR3, and CRD6 are useful background because they explain
+the wider prudential capital environment around credit risk models. They should
+not drive this repo's implementation, which is focused on IFRS 9 ECL,
+monitoring, and validation rather than capital/RWA calculation.
+
+References:
+- EBA, "CRR3/CRD6 dashboard."
+  https://www.eba.europa.eu/risk-and-data-analysis/risk-analysis/risk-monitoring/crr3-crd6-dashboard
+- BIS Basel Committee, "Basel III: Finalising post-crisis reforms."
+  https://www.bis.org/bcbs/publ/d424.htm
+
+## Backtesting
+
+Probability forecast quality is summarised with calibration tables, observed
+default rates by band, and Brier score.
 
 Reference:
 - Brier, G. W. (1950), "Verification of Forecasts Expressed in Terms of Probability."
   https://cir.nii.ac.jp/crid/1361981468554183168
 
-### Sinkhorn divergence
+## Drift And Sinkhorn
 
-The validation pack treats Sinkhorn divergence as optional. It is useful for distribution-shift analysis, but it should not make the generic validation workflow unusable when the OT dependency is absent.
+The validation pack computes PSI and Wasserstein distance. Sinkhorn divergence
+is optional and only runs when the `pot` dependency is installed; otherwise the
+API returns a structured `not_run` result.
 
 Reference:
 - Cuturi, M. (2013), "Sinkhorn Distances: Lightspeed Computation of Optimal Transport."
   https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport
 
-### International comparison
+## Markov Migration
 
-U.S. SR guidance can still be mentioned as an international comparison point in interviews, but it should not be the primary regulatory anchor for Dutch applications.
-
-### Markov and continuous-time room
-
-The repo is also intentionally scaffolded for two more advanced directions:
-
-- `Markov / state-transition modelling`, which is especially natural for delinquency migration, cure, prepayment, and IFRS 9 stage movement. The first implementation lives in `src/credit_risk_lab/econometrics/markov.py` and treats the transition matrix as the finite-state kernel, matrix powers as the semigroup, default/prepayment as absorbing cemetery-style states, and the absorbing-chain fundamental matrix as a Green/resolvent analogue.
-- `Continuous-time default modelling`, which becomes relevant when default timing is observed more finely than just quarter-end panels and where counting-process / intensity ideas become useful. The first implementation lives in `src/credit_risk_lab/econometrics/continuous_time.py` and includes piecewise intensity estimates, counting-process tables, compensated default diagnostics, and survival from intensity paths.
-
-Best extension slots:
-- `src/credit_risk_lab/econometrics/markov.py`
-- `src/credit_risk_lab/econometrics/continuous_time.py`
-
-Detailed bridge note:
-- `docs/dirichlet_markov_credit_bridge.md`
+Finite-state Markov migration is useful when the question is not only "will the
+loan default?" but "how does the loan move between credit states?" The baseline
+states are current, early arrears, serious arrears, default, and prepay/mature.
 
 References:
-- Fukushima, M., Oshima, Y., and Takeda, M. (2011), "Dirichlet Forms and Symmetric Markov Processes."
-  https://www.degruyterbrill.com/document/doi/10.1515/9783110218091/html
 - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), "A Markov Model for the Term Structure of Credit Risk Spreads."
   https://academic.oup.com/rfs/article/10/2/481/1589160
 - Lando, D., and Skodeberg, T. M. (2002), "Analyzing Rating Transitions and Rating Drift with Continuous Observations."
   https://www.sciencedirect.com/science/article/pii/S037842660100228X
+
+Implemented methods:
+- unconditional transition matrices,
+- grouped and macro-regime matrices,
+- covariate-dependent transition logits,
+- Markov-implied PD comparison,
+- stage-transition aggregation,
+- reversibility and score-smoothness diagnostics.
+
+Model-choice rule:
+- use Markov migration as a challenger or migration explanation,
+- use covariate Markov migration when transition probabilities differ
+  materially by borrower, product, or macro state,
+- keep the simpler unconditional matrix when sparse transition data make
+  covariate estimates unstable.
+
+## Continuous-Time Modelling
+
+Continuous-time modelling is preferable when exact event timing is available.
+If the data contain default dates, cure dates, delinquency-entry dates, or
+account-level durations, then intensities and CTMC generators are more natural
+than quarter-end approximations.
+
+References:
+- Andersen, P. K., and Gill, R. D. (1982), "Cox's Regression Model for Counting Processes."
+- Lando, D. (1998), "On Cox Processes and Credit Risky Securities."
+  https://doi.org/10.1017/S0269964898173055
+- Duffie, D., and Singleton, K. J. (1999), "Modeling Term Structures of Defaultable Bonds."
+  https://academic.oup.com/rfs/article-abstract/12/4/687/1599653
+
+Implemented methods:
+- exposure-count default intensities,
+- exact-interval default intensities,
+- compensated default counting-process diagnostics,
+- CTMC generator estimation from observed durations,
+- survival from intensity paths.
+
+Model-choice rule:
+- use quarterly discrete-time survival when observations are quarterly,
+- use exact-event-time intensities when event dates are observed,
+- use matrix-log generators only as diagnostics unless validity checks pass.
+
+## Matrix Logarithms And Embeddability
+
+A discrete transition matrix `P` can be generated by a continuous-time Markov
+chain only if there exists a valid generator `Q` such that `P = exp(Q dt)`.
+The matrix logarithm `log(P) / dt` is the formal inverse, but empirical credit
+matrices can fail the generator constraints.
+
+Reference:
+- Israel, R. B., Rosenthal, J. S., and Wei, J. Z. (2001), "Finding Generators for Markov Chains via Empirical Transition Matrices, with Applications to Credit Ratings."
+  https://doi.org/10.1080/713665550
+
+Implemented methods:
+- `transition_generator(P)` for the stable first-order approximation,
+- `matrix_log_generator(P)` for embeddability diagnostics,
+- `project_generator_to_valid_rates(Q)` for diagnostic repair experiments.
+
+## Continuous-State Credit Quality
+
+Continuous-state modelling is useful when credit quality is represented as a
+latent coordinate rather than a finite delinquency bucket. The process can
+combine gradual deterioration, sudden jumps, and killing/default.
+
+References:
+- Black, F., and Cox, J. C. (1976), "Valuing Corporate Securities: Some Effects of Bond Indenture Provisions."
+  https://www.jstor.org/stable/2326758
+- Fukushima, M., Oshima, Y., and Takeda, M. (2011), "Dirichlet Forms and Symmetric Markov Processes."
+  https://www.degruyterbrill.com/document/doi/10.1515/9783110218091/html
+- Ma, Z.-M., and Roeckner, M. (1992), "Introduction to the Theory of (Non-Symmetric) Dirichlet Forms."
+  https://link.springer.com/book/10.1007/978-3-642-77739-4
+
+Implemented methods:
+- latent state grid with default boundary,
+- OU-style finite-difference generator,
+- jump and killing/default intensities,
+- default probabilities from `exp(tQ)`,
+- Beurling-Deny-style local, jump, and killing decomposition,
+- finite-grid proxies for capacity, polar-like states, Cheeger energy, and
+  regularity.
+
+Model-choice rule:
+- use continuous-state diagnostics to compare process assumptions,
+- avoid claiming the synthetic quarterly data identify a continuous-state model
+  without additional event-time or latent-score evidence.

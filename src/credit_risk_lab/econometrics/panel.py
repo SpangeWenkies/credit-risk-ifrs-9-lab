@@ -17,7 +17,7 @@ Primary references
 - Wooldridge, "Econometric Analysis of Cross Section and Panel Data."
 - Arellano, "Panel Data Econometrics."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The module provides transformations and summaries, not a full panel estimator
   for nonlinear binary response models.
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
 
 
@@ -223,3 +224,209 @@ def cohort_performance_table(
     )
     table["default_rate"] = table["defaults"] / table["active_loans"].clip(lower=1)
     return table
+
+
+def add_interaction_terms(
+    frame: pd.DataFrame,
+    left_columns: Sequence[str],
+    right_columns: Sequence[str],
+    separator: str = "_x_",
+) -> pd.DataFrame:
+    """Add numeric interaction terms to a modelling frame.
+
+    Summary
+    -------
+    Create optional interaction features for testing macro-by-segment,
+    borrower-by-macro, or nonlinear panel specifications.
+
+    Method
+    ------
+    Every requested left column is multiplied by every requested right column.
+    New columns are named `{left}{separator}{right}` and appended to a copy of
+    the input frame.
+
+    Parameters
+    ----------
+    frame:
+        Input data frame.
+    left_columns:
+        First set of numeric columns.
+    right_columns:
+        Second set of numeric columns.
+    separator:
+        String used in generated feature names.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of `frame` with interaction columns.
+
+    Raises
+    ------
+    KeyError
+        Raised when requested columns are missing.
+
+    Notes
+    -----
+    Interactions should be compared against the baseline rather than added by
+    default. They are useful when diagnostics show that macro or behavioural
+    effects differ by another continuous risk driver.
+
+    Edge Cases
+    ----------
+    Duplicate generated names overwrite earlier generated names in the returned
+    copy.
+
+    References
+    ----------
+    - Wooldridge, "Econometric Analysis of Cross Section and Panel Data."
+    """
+
+    required = list(left_columns) + list(right_columns)
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing interaction columns: {missing}")
+    result = frame.copy()
+    for left in left_columns:
+        for right in right_columns:
+            result[f"{left}{separator}{right}"] = result[left].astype(float) * result[right].astype(float)
+    return result
+
+
+def add_polynomial_terms(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    degree: int = 2,
+) -> pd.DataFrame:
+    """Add polynomial terms for nonlinear effect checks.
+
+    Summary
+    -------
+    Create optional powers of numeric predictors to test whether a linear
+    specification is too restrictive.
+
+    Method
+    ------
+    For each selected column, the function adds powers from two through
+    `degree`, named `{column}_pow_{power}`.
+
+    Parameters
+    ----------
+    frame:
+        Input modelling frame.
+    columns:
+        Numeric columns to expand.
+    degree:
+        Maximum polynomial degree.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of `frame` with polynomial features.
+
+    Raises
+    ------
+    KeyError
+        Raised when requested columns are missing.
+    ValueError
+        Raised when `degree < 2`.
+
+    Notes
+    -----
+    Polynomial terms can reveal nonlinear LTV, DTI, or seasoning effects, but
+    they can also add noise. Compare them with out-of-sample metrics.
+
+    Edge Cases
+    ----------
+    Missing numeric values remain missing in generated powers.
+
+    References
+    ----------
+    - Wooldridge, "Econometric Analysis of Cross Section and Panel Data."
+    """
+
+    if degree < 2:
+        raise ValueError("degree must be at least two.")
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing polynomial columns: {missing}")
+    result = frame.copy()
+    for column in columns:
+        values = result[column].astype(float)
+        for power in range(2, degree + 1):
+            result[f"{column}_pow_{power}"] = np.power(values, power)
+    return result
+
+
+def poolability_diagnostic(
+    frame: pd.DataFrame,
+    segment_column: str,
+    observed_column: str,
+    prediction_column: str | None = None,
+) -> pd.DataFrame:
+    """Summarise whether a pooled model hides segment heterogeneity.
+
+    Summary
+    -------
+    Compare segment event rates, optional prediction means, and deviations from
+    the portfolio average.
+
+    Method
+    ------
+    The function computes segment counts and observed rates. When predictions
+    are supplied, it also computes calibration gaps. Deviations from the
+    portfolio event rate give a compact poolability diagnostic.
+
+    Parameters
+    ----------
+    frame:
+        Input validation or modelling frame.
+    segment_column:
+        Segment identifier.
+    observed_column:
+        Binary observed outcome column.
+    prediction_column:
+        Optional predicted probability column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Segment-level poolability diagnostic.
+
+    Raises
+    ------
+    KeyError
+        Raised when required columns are missing.
+
+    Notes
+    -----
+    Large segment deviations do not automatically require separate models; they
+    indicate where interaction terms, segment effects, or hierarchical
+    shrinkage should be tested.
+
+    Edge Cases
+    ----------
+    Small segments are retained so sparse-data risk remains visible.
+
+    References
+    ----------
+    - Wooldridge, "Econometric Analysis of Cross Section and Panel Data."
+    - Gelman and Hill, "Data Analysis Using Regression and Multilevel/
+      Hierarchical Models."
+    """
+
+    required = [segment_column, observed_column]
+    if prediction_column is not None:
+        required.append(prediction_column)
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise KeyError(f"Missing poolability columns: {missing}")
+    portfolio_rate = float(frame[observed_column].astype(int).mean())
+    aggregations = {"count": (observed_column, "size"), "observed_rate": (observed_column, "mean")}
+    if prediction_column is not None:
+        aggregations["mean_prediction"] = (prediction_column, "mean")
+    table = frame.groupby(segment_column, as_index=False).agg(**aggregations).rename(columns={segment_column: "segment"})
+    table["rate_minus_portfolio"] = table["observed_rate"] - portfolio_rate
+    if prediction_column is not None:
+        table["calibration_gap"] = table["observed_rate"] - table["mean_prediction"]
+    return table.sort_values("segment").reset_index(drop=True)

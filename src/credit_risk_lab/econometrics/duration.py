@@ -17,7 +17,7 @@ Primary references
 - Fine and Gray (1999), "A Proportional Hazards Model for the Subdistribution
   of a Competing Risk."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The module reports empirical hazards and cumulative incidence, not a full
   competing-risks regression.
@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+from .limited_dep import fit_binary_logit
 
 
 def duration_hazard_table(
@@ -245,3 +247,145 @@ def baseline_hazard_by_segment(
     table["default_hazard"] = table["defaults"] / table["at_risk"].clip(lower=1)
     table["log_hazard"] = np.log(table["default_hazard"].clip(lower=1e-8))
     return table
+
+
+def cure_relapse_table(
+    panel: pd.DataFrame,
+    loan_id_column: str = "loan_id",
+    date_column: str = "snapshot_date",
+    dpd_column: str = "days_past_due",
+) -> pd.DataFrame:
+    """Summarise cure and relapse movements in delinquency history.
+
+    Summary
+    -------
+    Track transitions between current and delinquent status for each loan.
+
+    Method
+    ------
+    The panel is sorted by loan and date. A row is delinquent when DPD is
+    positive. A cure is a transition from delinquent to current, and a relapse
+    is a transition from current to delinquent after a prior delinquency episode.
+
+    Parameters
+    ----------
+    panel:
+        Loan-period panel.
+    loan_id_column:
+        Loan identifier.
+    date_column:
+        Observation date.
+    dpd_column:
+        Days-past-due column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Loan-level cure and relapse counts.
+
+    Raises
+    ------
+    KeyError
+        Raised when required columns are missing.
+
+    Notes
+    -----
+    Cure and relapse diagnostics help decide whether a simple first-default
+    survival model misses recurrent delinquency dynamics.
+
+    Edge Cases
+    ----------
+    Loans with one observation have zero cure and relapse counts.
+
+    References
+    ----------
+    - Aalen, Borgan, and Gjessing, "Survival and Event History Analysis."
+    """
+
+    required = [loan_id_column, date_column, dpd_column]
+    missing = [column for column in required if column not in panel.columns]
+    if missing:
+        raise KeyError(f"Missing cure/relapse columns: {missing}")
+    ordered = panel.sort_values([loan_id_column, date_column]).copy()
+    ordered["_delinquent"] = ordered[dpd_column].astype(float).gt(0)
+    ordered["_prior_delinquent"] = ordered.groupby(loan_id_column)["_delinquent"].shift(1).fillna(False).astype(bool)
+    ever_delinquent = ordered.groupby(loan_id_column)["_delinquent"].cummax()
+    ordered["_ever_prior_delinquent"] = ever_delinquent.groupby(ordered[loan_id_column]).shift(1).fillna(False).astype(bool)
+    ordered["_cure"] = ordered["_prior_delinquent"] & ~ordered["_delinquent"]
+    ordered["_relapse"] = ordered["_ever_prior_delinquent"] & ~ordered["_prior_delinquent"] & ordered["_delinquent"]
+    return (
+        ordered.groupby(loan_id_column, as_index=False)
+        .agg(cures=("_cure", "sum"), relapses=("_relapse", "sum"), observations=("_delinquent", "size"))
+        .sort_values(loan_id_column)
+        .reset_index(drop=True)
+    )
+
+
+def fit_competing_risk_logits(
+    panel: pd.DataFrame,
+    numeric_columns: list[str],
+    categorical_columns: list[str] | None = None,
+    default_column: str = "default_next_period",
+    prepay_column: str = "prepayment_flag",
+) -> dict[str, object]:
+    """Fit separate binary logits for default and prepayment exits.
+
+    Summary
+    -------
+    Estimate simple cause-specific challenger models for competing exits.
+
+    Method
+    ------
+    The function fits one binary logit for default and one binary logit for
+    prepayment using the same feature set. The two models are intentionally
+    separate so each event type can have different drivers.
+
+    Parameters
+    ----------
+    panel:
+        Loan-period panel.
+    numeric_columns:
+        Numeric predictors.
+    categorical_columns:
+        Optional categorical predictors.
+    default_column:
+        Binary default event column.
+    prepay_column:
+        Binary prepayment event column.
+
+    Returns
+    -------
+    dict[str, object]
+        Fitted statsmodels results keyed by `default` and `prepayment` when
+        class variation permits.
+
+    Raises
+    ------
+    KeyError
+        Raised when event columns are missing.
+
+    Notes
+    -----
+    This is a practical competing-risk regression layer. It does not estimate a
+    Fine-Gray subdistribution hazard; it gives interpretable cause-specific
+    checks before using heavier models.
+
+    Edge Cases
+    ----------
+    If an event type has only one observed class, that model is skipped.
+
+    References
+    ----------
+    - Fine, J. P., and Gray, R. J. (1999), "A Proportional Hazards Model for the
+      Subdistribution of a Competing Risk."
+    """
+
+    missing = [column for column in (default_column, prepay_column) if column not in panel.columns]
+    if missing:
+        raise KeyError(f"Missing competing-risk columns: {missing}")
+    models: dict[str, object] = {}
+    if panel[default_column].nunique() > 1:
+        models["default"] = fit_binary_logit(panel, default_column, numeric_columns, categorical_columns)
+    if panel[prepay_column].nunique() > 1:
+        models["prepayment"] = fit_binary_logit(panel, prepay_column, numeric_columns, categorical_columns)
+    return models

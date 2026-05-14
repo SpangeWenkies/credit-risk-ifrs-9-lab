@@ -10,9 +10,9 @@ Assumptions
 -----------
 - Monitoring is performed between two comparable scored snapshots, typically the
   current and previous reporting dates.
-- PSI and first Wasserstein distance are sufficient summary metrics for a
-  portfolio project; they complement rather than replace more comprehensive
-  model-performance monitoring.
+- PSI and first Wasserstein distance are compact summary metrics for this lab;
+  they complement rather than replace more comprehensive model-performance
+  monitoring.
 - Range checks use transparent business-style bounds rather than institution-
   specific validation rules.
 
@@ -23,13 +23,12 @@ Primary references
 - ECB Banking Supervision, "Internal models."
   https://www.bankingsupervision.europa.eu/activities/internal_models/html/index.en.html
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - No external monitoring store or alerting framework is used.
 - PSI bins are derived from the combined reference/current sample for
   comparability.
-- Thresholds are intentionally simple so they can be explained quickly in an
-  interview.
+- Thresholds are intentionally simple and auditable.
 """
 
 from __future__ import annotations
@@ -233,7 +232,7 @@ def run_monitoring(
     Notes
     -----
     This function is designed for transparency. The thresholds are small and
-    explicit so they are easy to defend in a portfolio interview.
+    explicit so they are easy to review and test.
 
     Edge Cases
     ----------

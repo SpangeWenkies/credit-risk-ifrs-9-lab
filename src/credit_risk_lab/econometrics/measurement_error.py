@@ -16,7 +16,7 @@ Primary references
 - Fuller, "Measurement Error Models."
 - Little and Rubin, "Statistical Analysis with Missing Data."
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - Noise injection is additive Gaussian noise for numeric variables.
 - Missingness summaries are descriptive rather than formal missingness tests.

@@ -3,8 +3,7 @@
 This module translates point-in-time PD outputs into a simplified IFRS 9
 impairment workflow. It applies stage 1 / 2 / 3 logic, scenario-weighted
 expected credit loss calculations, stage migration summaries, and a basic
-provision roll-forward that mirrors the kind of artefacts a junior credit-risk
-or actuarial candidate may be asked to explain.
+provision roll-forward for model review and reconciliation.
 
 Assumptions
 -----------
@@ -21,7 +20,7 @@ Primary references
 - IFRS Foundation, "IFRS 9 Financial Instruments."
   https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The scenario engine is illustrative rather than an econometric satellite
   model.
@@ -60,7 +59,7 @@ def default_macro_scenarios() -> list[MacroScenario]:
     Summary
     -------
     Provide a compact scenario set that can be reused in examples, tests, and
-    recruiter-facing reports without external data dependencies.
+    reports without external data dependencies.
 
     Method
     ------

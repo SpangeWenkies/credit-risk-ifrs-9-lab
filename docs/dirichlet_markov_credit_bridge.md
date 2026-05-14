@@ -1,225 +1,315 @@
-# Dirichlet-Form Markov Theory In The Credit Migration Module
+# Dirichlet-Form And Markov Credit Migration Bridge
 
-This note explains how part of the basics of the Markov-chain and Dirichlet-form material from my course on Dirichlet forms at Tor Vergata can be used in the credit-risk repo without forcing abstract theory where it does not belong.
+This note explains how Markov-chain and Dirichlet-form ideas are used in the
+credit-risk lab. The purpose is practical: choose the right stochastic language
+for the data frequency, make state migration interpretable, and add diagnostics
+that compare discrete, continuous-time, and continuous-state credit processes.
 
-## Bottom Line
+## Practical Rule
 
-The 1-to-1 correspondence from markov chains and functional analysis objects in the course is directly useful for the Markov-chain challenger model part of this repo, but at the right level:
+Use the theory that matches the data and modelling object.
 
-- Use it strongly for finite-state credit migration, transition matrices, semigroups, generators, absorbing states, and Green/fundamental matrices.
-- Use it carefully for Dirichlet-energy diagnostics on score or stage functions over the migration graph.
-- Explicitly avoided is overclaiming regularity, quasi-regularity, capacity, polar sets, LeJan energy measures, or Cheeger energy in the first credit version. Those are better reserved for a later continuous-state or continuous-time extensions of the credit risk repo.
+| Data or modelling object | Recommended theory | Implemented location |
+| --- | --- | --- |
+| Quarterly delinquency states | Discrete-time finite Markov chain | `src/credit_risk_lab/econometrics/markov.py` |
+| Exact transition/default dates | Continuous-time Markov chain and counting process | `src/credit_risk_lab/econometrics/continuous_time.py` |
+| Latent continuous credit quality | Continuous-state generator with local, jump, and killing components | `src/credit_risk_lab/econometrics/continuous_state.py` |
+| Score or stage smoothness over observed migration | Finite-state Dirichlet energy diagnostic | `dirichlet_transition_energy`, `score_smoothness_diagnostics` |
+| Smooth latent score surface | Finite-grid Cheeger-energy proxy | `cheeger_energy_credit_proxy` |
 
-The practical credit translation is:
+The discrete quarterly model should not be dressed up as continuous-time theory
+unless it is explicitly used as an approximation. Conversely, if exact event
+times are available, it is better to estimate continuous-time intensities
+directly instead of forcing a quarterly panel model.
 
-| Course object | Finite-state credit object | Repo implementation |
+## Finite-State Credit Translation
+
+| Course object | Credit-risk object | Repo implementation |
 | --- | --- | --- |
 | State space `X` | Delinquency states plus terminal states | `current`, `dpd_1_29`, `dpd_30_89`, `default`, `prepay_mature` |
-| Kernel `p_t(x, dy)` | Transition probabilities | `transition_matrix` |
-| Semigroup `T_t` | Multi-period transition matrix | `n_step_transition_matrix(P, n)` |
-| Generator `L` / `Q` | Quarterly jump-rate approximation | `transition_generator(P)` |
-| Cemetery state | Default or prepay/mature terminal state | absorbing rows |
+| Kernel `p(x, dy)` | One-period migration probabilities | `fit_markov_transition_model` |
+| Semigroup `T_t` | Multi-period transition matrix powers | `n_step_transition_matrix(P, n)` |
+| Generator `Q` | Transition-rate matrix | `transition_generator`, `matrix_log_generator`, `estimate_ctmc_generator_from_durations` |
+| Cemetery state | Default or prepay/maturity terminal state | absorbing rows |
 | Green/resolvent intuition | Expected visits before absorption | `absorption_summary(P)` |
-| Dirichlet form | Transition-weighted roughness of a state function | `dirichlet_transition_energy(P, f)` |
-| Invariant sets | Closed communicating classes / absorbing components | default and prepay/mature states |
+| Dirichlet form | Transition-weighted roughness of a score | `dirichlet_transition_energy(P, f)` |
+| Detailed balance | Reversibility of state flows | `reversibility_diagnostics(P, m)` |
+| Regularisation by energy | Smooth a rating scale over observed migration | `regularize_state_scores(P, f)` |
 
-## What The Course Correspondence Adds
-
-### 1. Transition Matrix As Kernel
-
-In the notes, a Markov kernel maps a starting point to a probability measure over next states. In a finite credit state space, that kernel is simply a row of a transition matrix:
-
-```text
-P_ij = P(next_state = j | current_state = i)
-```
-
-This is exactly what the credit migration challenger model should estimate. The repo now has `fit_markov_transition_model(...)` in `src/credit_risk_lab/econometrics/markov.py`.
-
-### 2. Matrix Powers As Semigroup
-
-The course repeatedly uses the semigroup property:
-
-```text
-T_(s+t) = T_s T_t
-```
-
-For a quarterly migration matrix this becomes:
-
-```text
-P^(n+m) = P^n P^m
-```
-
-That gives a clean way to calculate multi-quarter migration probabilities and a Markov-implied default probability over 4 quarters, 8 quarters, or lifetime horizons.
-
-### 3. Generator As Continuous-Time Bridge
-
-The finite-state generator is the natural bridge to your intended continuous-time default modelling. For a one-quarter matrix, the first-order approximation is:
-
-```text
-Q = (P - I) / dt
-```
-
-The off-diagonal entries are transition intensities and rows sum to zero. This creates room for later continuous-time work:
-
-- estimate transition intensities from event times,
-- model default as an absorbing jump,
-- compare quarterly matrix estimates to continuous-time generator estimates,
-- connect default counting processes to reduced-form intensity modelling.
-
-The current implementation deliberately uses the simple approximation rather than a matrix logarithm, because empirical credit matrices are not always embeddable in a valid continuous-time chain.
-
-### 4. Absorbing States As Cemetery States
-
-The notes use a cemetery state to make a killed process conservative after it leaves the active state space. The credit version is natural:
-
-- active states are performing or delinquent loans,
-- default and prepay/maturity remove the loan from active performance,
-- adding `default` and `prepay_mature` as absorbing states keeps the augmented chain row-stochastic.
-
-This is useful because it shows the same idea in credit language: active-book attrition is a loss of mass unless terminal outcomes are included.
-
-### 5. Green/Fundamental Matrix For Expected Time Before Absorption
-
-The notes introduce Green/resolvent ideas to study accumulated occupation before long-run outcomes. In finite absorbing Markov chains, the same idea appears as the fundamental matrix:
-
-```text
-N = (I - P_TT)^(-1)
-```
-
-where `P_TT` is the transient-to-transient block. In credit risk this gives:
-
-- expected quarters before default/prepay/maturity,
-- expected time spent in delinquency states,
-- eventual probability of default versus prepayment/maturity.
-
-This is a strong as it makes Markov challenger more usefull than just a transition-count table.
-
-### 6. Dirichlet Energy As A Score Smoothness Diagnostic
-
-The course interprets a Dirichlet form as an energy measuring how much a function varies under the dynamics. In a credit migration graph, a function can be:
-
-- a numeric stage label,
-- a risk score,
-- a provision proxy,
-- a manually assigned credit quality scale.
-
-A finite-state energy diagnostic has the form:
-
-```text
-E(f) = 1/2 sum_i m_i sum_j P_ij (f_i - f_j)^2
-```
-
-Because credit migration is usually non-reversible, the repo symmetrises the jump conductance by default for this diagnostic.
-
-This is a good econometrics-heavy extension because it lets you ask:
-
-- Are score jumps aligned with observed migration?
-- Does the stage scale vary smoothly across common transitions?
-- Are there suspiciously large score discontinuities between states that frequently exchange mass?
-
-## What Should Not Be Forced Into V1
-
-Several lecture topics are mathematically important but too abstract for a first (discrete) credit-risk implementation.
-
-### Regularity And Quasi-Regularity
-
-Regular and quasi-regular Dirichlet forms matter when the state space has delicate topology or when one wants to construct a process from an analytic form. A finite delinquency-state chain has no such difficulty. The state space is finite, measurable, and fully explicit.
-
-Possible future use:
-
-- latent continuous credit-quality state,
-- continuous-time diffusion/jump process for creditworthiness,
-- point barriers or singular transition regions,
-- topology-sensitive state compression.
-
-### Capacity, Polar Sets, Quasi-Homeomorphism
-
-These are not needed to estimate a finite transition matrix. They become relevant only if the repo later models a continuous latent risk process where certain boundaries or points are negligible for the process but still matter analytically.
-
-Possible future use:
-
-- continuous credit quality process with default boundary,
-- singular borrower states that are rarely or never hit,
-- quasi-everywhere statements about default boundaries.
-
-### Locality, LeJan, Carre Du Champ, Cheeger Energy
-
-These are mainly useful for continuous-state local dynamics. Credit migration between delinquency types is a jump process, so the Beurling-Deny jump part is the more relevant conceptual bridge. The continuous local part is not the right first object.
-
-Possible future use:
-
-- continuous latent creditworthiness diffusion,
-- score dynamics with a metric structure,
-- energy regularisation for smooth macro-credit state surfaces.
-
-## Recommended Markov Roadmap
+## Implemented Roadmap
 
 ### V1: Finite-State Migration Challenger
 
-Implemented location:
+Implemented in `src/credit_risk_lab/econometrics/markov.py`.
 
-- `src/credit_risk_lab/econometrics/markov.py`
-
-Current capabilities:
-
-- build observed one-step transition panel,
-- estimate row-stochastic transition matrix,
-- force default and prepay/maturity as absorbing states,
-- compute multi-period matrix powers,
-- approximate a generator,
-- compute absorption probabilities and expected time to absorption,
-- compute a Dirichlet-style score roughness diagnostic,
-- estimate grouped transition matrices for segment or macro-regime style conditioning,
-- compute Markov-implied default PDs for challenger comparison.
+- Build observed one-step transition panels.
+- Estimate row-stochastic transition matrices.
+- Force default and prepay/maturity as absorbing states.
+- Compute multi-period matrix powers.
+- Approximate a generator by `(P - I) / dt`.
+- Compute absorption probabilities and expected time to absorption.
+- Compute finite-state Dirichlet-style score roughness.
+- Estimate grouped transition matrices.
+- Compute Markov-implied default PDs.
 
 ### V2: Covariate-Dependent Markov Model
 
-Next upgrade:
+Implemented in `fit_covariate_transition_model`.
 
-- estimate `P(next_state | current_state, borrower features, macro variables)`,
-- use multinomial logit or separate transition logits,
-- compare Markov-implied default probabilities to survival-logit PDs,
-- explain stage migration through transition probabilities rather than only through realised summaries.
+- Estimate `P(next_state | current_state, borrower features, macro variables)`.
+- Use robust one-vs-rest transition logits with empirical fallback.
+- Score row-level transition distributions.
+- Compute covariate Markov default PDs.
+- Compare Markov-implied default PDs to survival-logit PDs with `compare_markov_to_survival_pd`.
+
+This is a challenger and explanation layer, not a replacement for the primary
+survival PD model by default.
 
 ### V3: Macro-Sensitive Markov Scenario Engine
 
-Planned upgrade:
+Implemented in `assign_macro_regime`, `fit_macro_regime_transition_matrices`,
+and `build_markov_scenario_matrices`.
 
-- estimate transition matrices conditional on macro regimes,
-- produce baseline/downside/upside migration matrices,
-- avoid double-counting by choosing one primary macro channel for PD or migration.
+- Label benign, baseline, and stress regimes from a macro variable.
+- Estimate regime-conditioned migration matrices.
+- Map baseline/downside/upside scenarios to migration matrices.
+- Avoid double-counting by using this either as the migration channel or as a
+  challenger when the PD model already includes macro covariates.
 
 ### V4: Continuous-Time Default And Counting Processes
 
-Planned upgrade:
+Implemented in `src/credit_risk_lab/econometrics/continuous_time.py`.
 
-- estimate continuous-time transition intensities when exact event dates are available,
-- model default as an absorbing jump time,
-- write the default indicator as a counting process,
-- connect compensated default counting processes to intensity-based credit modelling.
+- Estimate piecewise default intensities from panel exposure counts.
+- Estimate default intensities from exact start/end event intervals.
+- Estimate CTMC generators from observed state durations.
+- Build compensated default counting-process diagnostics.
+- Convert intensity paths into continuous-time survival probabilities.
 
-### V5: Dirichlet-Form Regularisation Or Diagnostics
+The continuous-time object is the counting process `N_t` and its compensator
+`A_t = integral lambda_s ds`. If the intensity model is adequate, the
+compensated process `N_t - A_t` should not show systematic drift.
 
-Planned upgrade:
+### V5: Dirichlet-Form Regularisation And Continuous-State Diagnostics
 
-- use transition energy to regularise state scores or rating scales,
-- penalise excessive roughness over commonly observed migration edges,
-- investigate whether a proposed credit score is dynamically coherent with observed borrower movement.
+Implemented in `markov.py` and `continuous_state.py`.
 
-## Interview Framing
+- Use transition energy to detect rough state scores.
+- Decompose which migration edges drive roughness.
+- Smooth state scores with a graph-Laplacian penalty.
+- Diagnose reversibility before choosing symmetric or non-symmetric energy.
+- Build a latent continuous credit-quality grid with default boundary.
+- Construct a generator with local diffusion, downward jumps, and killing.
+- Decompose energy into local, jump, and killing components.
+- Run finite-grid proxies for capacity, polar-like states, Cheeger energy, and
+  regularity.
 
-The clean interview version is:
+## Simple Explanation Of The Matrix-Log Sentence
 
-> The survival logit is my primary PD model because it directly estimates a next-period default hazard from loan-quarter panel data. A Markov model is the natural challenger because credit deterioration is state-based. My Markov extension treats delinquency buckets as a finite state space, estimates the transition kernel, uses matrix powers as the semigroup, adds default and prepayment as absorbing cemetery states, and uses a generator as the bridge to later continuous-time intensity modelling.
+The old note said:
 
-A stronger econometrics version is:
+> The current implementation deliberately uses the simple approximation rather
+> than a matrix logarithm, because empirical credit matrices are not always
+> embeddable in a valid continuous-time chain.
 
-> My Markov-chain coursework gave me a functional-analytic dictionary: kernel, semigroup, generator, process, and energy form. In this repo I use the finite-state version of that dictionary for credit migration. The abstract regularity and capacity theory is not needed for the first implementation, but it gives a roadmap for future continuous-state or continuous-time default models.
+Plain-language version:
+
+A quarterly transition matrix says where borrowers ended up after one quarter.
+For example, out of all loans that started current, some stayed current, some
+moved into arrears, and some defaulted. That matrix is directly observed from
+quarterly data.
+
+A continuous-time model asks a harder question: what was happening inside the
+quarter? Did borrowers deteriorate gradually, jump suddenly, or default at a
+specific time? To answer that, we need transition rates, not just before/after
+quarterly percentages.
+
+The simple approximation says: if one quarter is short enough, then the
+quarterly change is approximately equal to rate times time:
+
+```text
+Q approx (P - I) / dt
+```
+
+This is easy to inspect. Off-diagonal entries are approximate transition rates,
+and diagonal entries are exit rates. It is not perfect, but it almost never
+breaks the workflow.
+
+## Why Use A Matrix Logarithm?
+
+In a true continuous-time Markov chain:
+
+```text
+P(dt) = exp(dt Q)
+```
+
+The matrix exponential turns transition rates `Q` into a transition matrix over
+time `dt`. Therefore, if we already have `P(dt)` and want the exact `Q`, the
+formal inverse is:
+
+```text
+Q = log(P(dt)) / dt
+```
+
+That is why a matrix logarithm is mathematically attractive. It asks for the
+continuous-time generator whose exponential reproduces the observed quarterly
+matrix.
+
+The repo now implements this as `matrix_log_generator(P)`. It returns the
+candidate generator and diagnostics rather than silently accepting the result.
+
+## Why Empirical Credit Matrices May Not Be Embeddable
+
+An empirical credit matrix is a transition matrix estimated from observed data:
+count movements from one state to another, divide by row totals, and obtain
+quarterly probabilities. It contains sampling noise, sparse rows, absorbing
+states, and sometimes zero cells.
+
+Embeddable means there exists a continuous-time generator `Q` such that:
+
+```text
+P = exp(Q dt)
+```
+
+A valid continuous-time generator must satisfy three constraints:
+
+- off-diagonal entries are non-negative transition intensities,
+- rows sum to zero,
+- diagonal entries are non-positive exit rates.
+
+Some empirical matrices have no matrix logarithm satisfying these constraints.
+The numerical logarithm can produce a candidate with negative off-diagonal
+rates. A negative transition intensity is not a valid continuous-time Markov
+chain. It would mean a borrower has a negative instantaneous rate of moving from
+one credit state to another.
+
+The practical implementation therefore uses:
+
+- `(P - I) / dt` as a transparent approximation,
+- `matrix_log_generator(P)` as an embeddability diagnostic,
+- `estimate_ctmc_generator_from_durations(...)` as the preferred estimator when
+  exact transition durations are available.
+
+The matrix logarithm is useful after the continuous-time extension, but mainly
+as a diagnostic or sensitivity check unless it passes generator validity tests.
+
+## Reversibility And Credit Migration
+
+Reversibility means detailed balance:
+
+```text
+m_i P_ij = m_j P_ji
+```
+
+In simple language, the amount of probability flow from state `i` to state `j`
+equals the reverse flow from `j` back to `i` under a reference distribution
+`m`.
+
+Credit migration is usually non-reversible because deterioration and repair are
+not mirror images. A loan moving from current to 30-89 DPD is not economically
+the same as a loan curing from 30-89 DPD back to current. Default and
+prepayment also create terminal mass that does not flow back. Lando and
+Skodeberg (2002) explicitly study rating drift and transition dynamics using
+continuous observations, which is exactly the setting where downgrade/upgrade
+asymmetries and duration effects become visible.
+
+When could migration be close to reversible?
+
+- A closed, non-terminal rating system with stable long-run state occupancy.
+- Similar upgrade and downgrade mechanisms after conditioning on the invariant
+  distribution.
+- No absorbing default or prepayment state in the analysed subchain.
+- A deliberately symmetrised diagnostic graph rather than the true migration
+  dynamics.
+
+If reversibility is empirically plausible, use the invariant distribution `pi`
+and the reversible conductance `pi_i P_ij` directly. If it is not plausible,
+either use a symmetrised diagnostic only for roughness checks or move to
+non-symmetric Dirichlet-form tools. The repo exposes
+`reversibility_diagnostics(P, m)` so this choice is visible.
+
+## Score Smoothness Diagnostic In Plain Language
+
+A credit score or stage scale should not behave strangely relative to how loans
+actually move. If two states frequently exchange borrowers, and the score jumps
+massively between those states, the score scale may be too jagged or the state
+definition may hide important information.
+
+The diagnostic computes a penalty:
+
+```text
+large migration probability * large score jump^2
+```
+
+The questions arise naturally:
+
+| Question | Why it matters | How the repo answers it |
+| --- | --- | --- |
+| Are score jumps aligned with observed migration? | A big score jump is reasonable for rare severe movement, but suspicious for common mild movement. | `score_smoothness_diagnostics` lists the edges with largest energy contribution. |
+| Does the stage scale vary smoothly across common transitions? | IFRS-style stages should reflect deterioration, not arbitrary discontinuities. | `dirichlet_transition_energy` compares raw stage labels or scores. |
+| Are there suspiciously large score discontinuities between states that frequently exchange mass? | Frequent two-way movement with huge score gaps suggests unstable bucketing or noisy policy thresholds. | `regularize_state_scores` shows how much smoothing the migration graph implies. |
+
+These questions still arise if the process is reversible. The difference is
+that in a reversible process the energy has a cleaner probabilistic
+interpretation under detailed balance. In a non-reversible credit process, the
+same calculation is a diagnostic unless a non-symmetric form is explicitly used.
+
+## Continuous-State Dirichlet Translation
+
+The continuous-state module is useful in practice when the analyst wants to
+study a latent credit-quality process, exact default timing, or how default
+arises from gradual deterioration versus sudden jumps.
+
+| Dirichlet-form topic | Practical credit translation | What the repo gains |
+| --- | --- | --- |
+| Regularity | The latent state space, topology, and boundary are explicit enough to support a process. | `regularity_diagnostics_for_grid` checks the finite-grid modelling contract. |
+| Quasi-regularity | Needed for delicate infinite-dimensional state spaces; not binding on the finite grid. | The doc states when the finite-grid proxy stops being enough. |
+| Capacity | Measures whether the default boundary is visible to the process. | `default_boundary_capacity_proxy` reports how much direct default conductance reaches the cemetery state. |
+| Polar sets | Sets the process almost never hits. | `polar_state_diagnostic` flags states with negligible incoming rate. |
+| Quasi-homeomorphism | Lets one transfer quasi-everywhere statements between equivalent state representations. | Useful later for state compression; currently documented, not overclaimed. |
+| Locality | Distinguishes continuous local movement from jumps. | `beurling_deny_credit_decomposition` separates local nearest-neighbour energy from jump energy. |
+| LeJan / carré du champ | Local squared-gradient energy of a score surface. | Local component explains whether score variation is driven by gradual credit-quality movement. |
+| Cheeger energy | Metric-space squared-gradient energy. | `cheeger_energy_credit_proxy` checks whether a latent PD or score surface is unnecessarily jagged. |
+| Killing | Default as mass removed from active credit states. | Killing energy isolates direct jump-to-default or boundary default behaviour. |
+| Beurling-Deny decomposition | Energy split into local, jump, and killing parts. | Different continuous credit models can be compared by whether risk comes from diffusion, sudden jumps, or default killing. |
+
+## Continuous-Time Versus Continuous-State
+
+Continuous-time does not automatically mean continuous-state.
+
+| Model | State space | Time | Practical use |
+| --- | --- | --- | --- |
+| Quarterly survival logit | Loan rows and features | discrete quarters | baseline PD with panel data |
+| Finite Markov chain | delinquency states | discrete quarters | migration challenger |
+| CTMC migration | delinquency states | continuous time | exact transition dates and generator intensities |
+| Intensity default model | alive/default counting process | continuous time | default time modelling |
+| Latent diffusion/jump/killing | continuous credit quality | continuous time | structural diagnostics and local/jump/default decomposition |
+
+The repo uses continuous-time theory only when a function explicitly says so:
+`matrix_log_generator`, `estimate_ctmc_generator_from_durations`,
+`build_compensated_process_from_intervals`, and functions in
+`continuous_state.py`.
+
+## Paper Map
+
+| Paper or source | Why it is relevant here |
+| --- | --- |
+| Jarrow, Lando, and Turnbull (1997) | Markov-chain credit migration with default as a credit-risk state. |
+| Lando and Skodeberg (2002) | Rating transitions with continuous observations, generator estimation, and rating drift. |
+| Israel, Rosenthal, and Wei (2001) | Matrix-log and generator estimation problems for empirical credit rating transition matrices. |
+| Black and Cox (1976) | Structural first-passage default with a default boundary. |
+| Lando (1998) | Cox-process intensity modelling for defaultable securities. |
+| Duffie and Singleton (1999) | Reduced-form defaultable bond modelling with default intensity and recovery assumptions. |
+| Fukushima, Oshima, and Takeda (2011) | Symmetric Markov processes, Dirichlet forms, capacity, killing, and energy. |
+| Ma and Roeckner (1992) | Non-symmetric Dirichlet forms, relevant because credit migration is generally non-reversible. |
 
 ## References
 
-- Fukushima, M., Oshima, Y., and Takeda, M. (2011), [*Dirichlet Forms and Symmetric Markov Processes*](https://www.degruyterbrill.com/document/doi/10.1515/9783110218091/html), 2nd revised and extended edition.
-- Ma, Z.-M., and Roeckner, M. (1992), [*Introduction to the Theory of (Non-Symmetric) Dirichlet Forms*](https://link.springer.com/book/10.1007/978-3-642-77739-4).
+- Black, F., and Cox, J. C. (1976), ["Valuing Corporate Securities: Some Effects of Bond Indenture Provisions"](https://www.jstor.org/stable/2326758).
+- Duffie, D., and Singleton, K. J. (1999), ["Modeling Term Structures of Defaultable Bonds"](https://academic.oup.com/rfs/article-abstract/12/4/687/1599653).
+- Fukushima, M., Oshima, Y., and Takeda, M. (2011), [*Dirichlet Forms and Symmetric Markov Processes*](https://www.degruyterbrill.com/document/doi/10.1515/9783110218091/html).
+- Israel, R. B., Rosenthal, J. S., and Wei, J. Z. (2001), ["Finding Generators for Markov Chains via Empirical Transition Matrices, with Applications to Credit Ratings"](https://doi.org/10.1080/713665550).
 - Jarrow, R. A., Lando, D., and Turnbull, S. M. (1997), ["A Markov Model for the Term Structure of Credit Risk Spreads"](https://academic.oup.com/rfs/article/10/2/481/1589160).
+- Lando, D. (1998), ["On Cox Processes and Credit Risky Securities"](https://doi.org/10.1017/S0269964898173055).
 - Lando, D., and Skodeberg, T. M. (2002), ["Analyzing Rating Transitions and Rating Drift with Continuous Observations"](https://www.sciencedirect.com/science/article/pii/S037842660100228X).
-- Kemeny, J. G., and Snell, J. L. (1976), *Finite Markov Chains*.
+- Ma, Z.-M., and Roeckner, M. (1992), [*Introduction to the Theory of (Non-Symmetric) Dirichlet Forms*](https://link.springer.com/book/10.1007/978-3-642-77739-4).

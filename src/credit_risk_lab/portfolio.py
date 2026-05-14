@@ -7,8 +7,8 @@ shareable while still supporting a realistic modelling workflow.
 
 Assumptions
 -----------
-- Quarterly snapshots are sufficient for a portfolio project that wants to
-  demonstrate discrete-time survival modelling and IFRS 9 staging without
+- Quarterly snapshots are sufficient for the baseline lab workflow that wants
+  to demonstrate discrete-time survival modelling and IFRS 9 staging without
   introducing monthly data volume or unnecessary complexity.
 - The simulation imposes intuitive monotonic relationships between worsening
   borrower conditions and higher delinquency/default pressure, but it does not
@@ -21,13 +21,13 @@ Primary references
 - IFRS Foundation, "IFRS 9 Financial Instruments."
   https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/ifrs-9-financial-instruments.pdf
 
-Simplifications for this portfolio project
+Simplifications for this lab
 ------------------------------------------
 - The portfolio combines mortgages, auto loans, personal loans, and revolving
   credit in a single synthetic generator.
 - Macro variables are simulated rather than sourced externally.
 - Default timing, utilization, and recovery patterns are stylised so the code
-  remains inspectable by recruiters and junior-role interviewers.
+  remains inspectable and reproducible.
 """
 
 from __future__ import annotations

@@ -19,6 +19,7 @@ The repo should communicate this message clearly:
 | Forward hazard paths | Lifetime PD without flat hazard | constant-hazard conversion in [`src/credit_risk_lab/survival.py`](../src/credit_risk_lab/survival.py) | `src/credit_risk_lab/econometrics/forward_hazard.py` |
 | Markov chains | State migration, cure, prepay, stage movement | migration summaries in [`src/credit_risk_lab/ecl.py`](../src/credit_risk_lab/ecl.py), finite-state utilities in [`src/credit_risk_lab/econometrics/markov.py`](../src/credit_risk_lab/econometrics/markov.py) | `src/credit_risk_lab/econometrics/markov.py` |
 | Continuous-time default modelling | Intensities and event timing beyond quarter-end panels | [`src/credit_risk_lab/econometrics/continuous_time.py`](../src/credit_risk_lab/econometrics/continuous_time.py) | exact event-time intensity models |
+| Continuous-state credit quality | Latent credit-quality diffusion, jumps, and killing/default | [`src/credit_risk_lab/econometrics/continuous_state.py`](../src/credit_risk_lab/econometrics/continuous_state.py) | fitted latent-state models |
 | Limited dependent variable models | Delinquency, cure, prepayment | [`src/credit_risk_lab/econometrics/limited_dep.py`](../src/credit_risk_lab/econometrics/limited_dep.py) | ordered / multinomial variants |
 | Model selection | Feature choice, challenger models, regularisation | [`src/credit_risk_lab/econometrics/model_selection.py`](../src/credit_risk_lab/econometrics/model_selection.py) | cross-validation workflows |
 | Calibration | Aligning PDs to observed defaults | [`src/credit_risk_lab/econometrics/calibration.py`](../src/credit_risk_lab/econometrics/calibration.py), [`model_validation_pack/src/model_validation_pack/backtest.py`](../model_validation_pack/src/model_validation_pack/backtest.py) | smoother calibration models |
@@ -39,10 +40,9 @@ Implemented first layer:
 - borrower fixed effects,
 - cohort effects,
 - panel-summary tables for migration and attrition.
-
-Still open:
 - macro-by-segment interaction terms,
-- nonlinear fixed-effects PD estimators.
+- polynomial feature expansion for nonlinear-effect checks,
+- poolability diagnostics before choosing pooled, segmented, or hierarchical specifications.
 
 ### 2. Duration-model upgrade
 
@@ -54,10 +54,8 @@ Implemented first layer:
 - competing risks for default vs prepayment,
 - duration dependence terms,
 - baseline hazard visualisation.
-
-Still open:
 - cure / relapse logic,
-- competing-risks regression.
+- cause-specific competing-risk logits.
 
 ### 2b. Forward hazard / lifetime-PD upgrade
 
@@ -85,10 +83,8 @@ Implemented first layer:
 - Platt / intercept-shift style recalibration,
 - long-run average default rate alignment,
 - Brier score support.
-
-Still open:
 - segment-wise calibration drift,
-- isotonic and spline calibration.
+- isotonic calibration.
 
 ### 4. Causal / identification upgrade
 
@@ -99,10 +95,8 @@ Implemented first layer:
 - endogeneity notes for macro covariates,
 - policy shock thought experiments,
 - treatment of predictive versus structural interpretation.
-
-Still open:
 - omitted-variable experiments,
-- actual identification designs.
+- coefficient stability sensitivity between restricted and full specifications.
 
 ### 5. Heterogeneity upgrade
 
@@ -112,11 +106,8 @@ Best location:
 Implemented first layer:
 - segment-specific PD models,
 - borrower-type splits,
-- product-specific coefficients and stability checks.
-
-Still open:
-- random-effects style experiments,
-- hierarchical models.
+- product-specific coefficients and stability checks,
+- empirical-Bayes segment shrinkage as a lightweight hierarchical diagnostic.
 
 ### 6. Markov-chain challenger and migration upgrade
 
@@ -134,21 +125,22 @@ Implemented first layer:
 - grouped transition matrices for covariate or regime splits,
 - Markov-implied default PDs for challenger comparison.
 
-Good next additions:
-- transition matrix for a richer state space: `current`, `1-29 DPD`, `30-89 DPD`, `90+ / default`, `cure`, `prepay / mature`,
-- full multinomial covariate-dependent transition probabilities,
-- stage-migration explanation for IFRS 9,
+Implemented extended layer:
+- covariate-dependent one-vs-rest transition logits with empirical fallback,
+- row-level transition probability scoring,
 - comparison of Markov-implied default risk versus survival-logit PDs,
-- macro-regime-specific transition matrices.
+- macro-regime-specific transition matrices,
+- baseline/downside/upside scenario migration matrices,
+- stage-migration aggregation,
+- matrix-log generator diagnostics and generator repair helpers,
+- reversibility diagnostics,
+- score smoothness decomposition,
+- graph-Laplacian score regularisation.
 
 Recommended role:
-- keep the survival-logit as the primary PD model,
-- use the Markov model as a challenger, migration model, or educational comparison,
+- keep the survival-logit as the primary PD model unless model comparison supports a change,
+- use the Markov model as a challenger, migration model, or state-transition explanation,
 - evolve it later into a multi-state survival style extension.
-
-Interview line:
-
-> The survival logit is my primary PD model. A Markov model is a natural challenger because credit deterioration is state-based and it explains stage migration more directly than a binary default model.
 
 Functional-analysis bridge:
 - the transition matrix is the finite-state kernel,
@@ -169,16 +161,42 @@ Best location:
 Implemented first layer:
 - reduced-form intensity modelling,
 - compensated default counting process table,
-- stochastic-calculus notes translating econometric training into credit-risk language,
+- exact interval default-intensity estimation,
+- CTMC generator estimation from observed state durations,
+- compensated process construction from exact intervals,
 - bridge between discrete-time panel approximations and continuous-time default intensities.
 
 Still open:
-- exact default times between reporting dates,
-- Cox-process or counting-process regression.
+- Cox-process or counting-process regression with covariates,
+- recurrent delinquency event processes,
+- censoring-aware estimation for incomplete event histories.
 
 Why it belongs here:
-- this repo is quarterly and discrete-time now because that is the clearest version for a portfolio project,
+- this repo starts quarterly and discrete-time because that matches the synthetic reporting panel,
 - but the scaffold should already show that it can grow into continuous-time default modelling when richer event timing is available.
+
+### 7b. Continuous-state latent credit-quality upgrade
+
+Best location:
+- `src/credit_risk_lab/econometrics/continuous_state.py`
+
+Implemented layer:
+- finite latent credit-quality grid with explicit default boundary,
+- OU-style finite-difference generator with local diffusion,
+- optional downward jumps and killing/default intensity,
+- default probabilities from `exp(tQ)`,
+- Beurling-Deny-style split into local, jump, and killing energy,
+- finite-grid capacity, polar-like state, Cheeger-energy, and regularity diagnostics.
+
+Use this layer when:
+- event timing or latent credit quality matters more than quarter-end buckets,
+- the model needs to distinguish gradual deterioration from sudden jumps,
+- score surfaces or management overlays should be checked for smoothness over a metric state space.
+
+Do not use this layer automatically:
+- quarterly bucket data alone may not identify a continuous-state process,
+- a non-constant hazard path can add noise if the empirical hazard is actually close to flat,
+- Dirichlet regularisation is a diagnostic and model-design tool, not proof that the true credit process is symmetric.
 
 ### 8. Macro-sensitive PD path upgrade
 
@@ -188,22 +206,41 @@ Best locations:
 
 Implemented first layer:
 - AR(1) macro forecasting layer,
+- VAR(1) macro forecasting layer,
 - baseline/downside/upside macro path construction,
 - score baseline/downside/upside macro paths directly through the PD model,
 - keep scenario overlays mainly for LGD and EAD,
 - use PD overlays only as explicitly labelled management overlays if needed.
 
 Still open:
-- VAR or richer macro satellite model,
 - direct refit of the primary PD model with macro variables in the default feature spec.
 
 Recommended design:
 - one primary macro channel for PD,
 - avoid putting unemployment into the PD model and then multiplying PD again in ECL for the same effect unless that second layer is clearly a judgemental overlay.
 
-## What To Say In Interviews
+## Toolbox Principle
 
-- "This repo is where I translate econometrics into credit risk."
-- "The panel, binary-outcome, calibration, and survival logic are econometric strengths I already had."
-- "The value of the project is showing how those tools become provisions, stress tests, and validation evidence in a regulated credit-risk setting."
-- "The current repo starts with a transparent discrete-time hazard model, but it is intentionally scaffolded for forward hazard paths, macro-sensitive PD term structures, Markov migration models, and continuous-time default modelling."
+The modules are designed as a lab. A nonlinear term, heterogeneity correction,
+macro-sensitive hazard path, Markov challenger, continuous-time generator, or
+Dirichlet regulariser should be used only after a diagnostic or model-comparison
+reason supports it. The intended workflow is:
+
+- fit the transparent baseline,
+- run diagnostics for calibration, heterogeneity, macro sensitivity, drift, and
+  migration coherence,
+- add one extension at a time,
+- compare against the baseline,
+- keep the simpler model when the extension adds noise or weakens validation
+  evidence.
+
+## Regulatory Boundary
+
+The econometric toolbox is aligned with IFRS 9 ECL, EBA Loan Origination and
+Monitoring, Definition of Default, and model-governance concepts. CRR3/CRD6 and
+Basel final reforms are background capital context only. The repo should not
+mix IFRS 9 provisioning with a capital/RWA engine unless a separate module is
+explicitly added for that purpose.
+
+Detailed note:
+- [`docs/regulatory_scope.md`](regulatory_scope.md)
